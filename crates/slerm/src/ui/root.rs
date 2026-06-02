@@ -1,9 +1,13 @@
-use gpui::{Context, FontWeight, IntoElement, Render, Window, div, prelude::*, rgb};
+use gpui::{Context, FontWeight, IntoElement, Render, Window, div, prelude::*};
+
+use crate::theme;
 
 pub struct SlermApp;
 
 impl Render for SlermApp {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = theme::active();
+
         div()
             .size_full()
             .flex()
@@ -11,8 +15,8 @@ impl Render for SlermApp {
             .items_center()
             .justify_center()
             .gap_3()
-            .bg(rgb(0x18181b))
-            .text_color(rgb(0xf4f4f5))
+            .bg(theme.bg)
+            .text_color(theme.fg)
             .child(
                 div()
                     .text_2xl()
@@ -22,7 +26,7 @@ impl Render for SlermApp {
             .child(
                 div()
                     .text_sm()
-                    .text_color(rgb(0xa1a1aa))
+                    .text_color(theme.minus1)
                     .child("A GPUI workspace ready to build on."),
             )
     }
