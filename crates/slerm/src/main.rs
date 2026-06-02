@@ -2,6 +2,7 @@ mod actions;
 mod app;
 mod keymap;
 mod project;
+mod storage;
 mod terminal;
 mod theme;
 mod ui;

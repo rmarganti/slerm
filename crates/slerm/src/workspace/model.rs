@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
     project::model::{CycleDirection, Project, ProjectId},
     terminal::{
@@ -6,7 +8,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WorkspaceState {
     pub projects: Vec<Project>,
     pub active_project: Option<ProjectId>,

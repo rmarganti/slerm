@@ -179,7 +179,7 @@ impl RenderOnce for ItemRow {
                 row.child(
                     div()
                         .text_xs()
-                        .text_color(theme.minus1)
+                        .text_color(theme.minus2)
                         .child(format!("⌘{index}")),
                 )
             })

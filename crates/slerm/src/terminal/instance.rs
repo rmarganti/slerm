@@ -1,11 +1,13 @@
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::{project::model::ProjectId, terminal::kind::TerminalKind};
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct TerminalInstanceId(pub u64);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TerminalInstance {
     pub id: TerminalInstanceId,
     pub project_id: ProjectId,

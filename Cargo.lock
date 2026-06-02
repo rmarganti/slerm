@@ -4747,6 +4747,9 @@ name = "slerm"
 version = "0.1.0"
 dependencies = [
  "gpui",
+ "rand 0.9.4",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

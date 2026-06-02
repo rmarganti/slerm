@@ -1,4 +1,6 @@
-#[derive(Clone, Debug, Eq, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum AgentKind {
     Codex,
     OpenCode,
@@ -6,7 +8,7 @@ pub enum AgentKind {
     Custom(String),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum TaskStatus {
     Idle,
     Running,
@@ -14,7 +16,7 @@ pub enum TaskStatus {
     Failed,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum TerminalKind {
     Terminal,
     Agent(AgentKind),

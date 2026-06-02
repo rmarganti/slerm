@@ -6,7 +6,7 @@ use crate::{
         ActiveProjectCyclePrev,
     },
     project::model::CycleDirection,
-    theme,
+    storage, theme,
     ui::{project_bar::ProjectBar, sidebar::Sidebar, terminal_pane::TerminalPane},
     workspace::model::WorkspaceState,
 };
@@ -17,9 +17,9 @@ pub struct SlermApp {
 }
 
 impl SlermApp {
-    pub fn mock(cx: &mut Context<Self>) -> Self {
+    pub fn new(workspace: WorkspaceState, cx: &mut Context<Self>) -> Self {
         Self {
-            workspace: cx.new(|_| WorkspaceState::mock()),
+            workspace: cx.new(|_| workspace),
             focus_handle: cx.focus_handle(),
         }
     }
@@ -72,26 +72,37 @@ impl SlermApp {
     }
 
     fn cycle_active_item(&mut self, direction: CycleDirection, cx: &mut Context<Self>) {
-        self.workspace.update(cx, |workspace, cx| {
+        self.update_workspace(cx, |workspace| {
             workspace.cycle_active_item(direction);
-            cx.notify();
         });
-        cx.notify();
     }
 
     fn cycle_active_project(&mut self, direction: CycleDirection, cx: &mut Context<Self>) {
-        self.workspace.update(cx, |workspace, cx| {
+        self.update_workspace(cx, |workspace| {
             workspace.cycle_active_project(direction);
-            cx.notify();
         });
-        cx.notify();
     }
 
     fn select_active_item_by_sidebar_index(&mut self, index: usize, cx: &mut Context<Self>) {
-        self.workspace.update(cx, |workspace, cx| {
+        self.update_workspace(cx, |workspace| {
             workspace.select_active_item_by_sidebar_index(index);
+        });
+    }
+
+    fn update_workspace(
+        &mut self,
+        cx: &mut Context<Self>,
+        update: impl FnOnce(&mut WorkspaceState),
+    ) {
+        self.workspace.update(cx, |workspace, cx| {
+            update(workspace);
             cx.notify();
         });
+
+        if let Err(error) = storage::save_workspace(self.workspace.read(cx)) {
+            eprintln!("failed to save workspace: {error}");
+        }
+
         cx.notify();
     }
 }

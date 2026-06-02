@@ -1,8 +1,10 @@
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 use crate::terminal::instance::{TerminalInstance, TerminalInstanceId};
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct ProjectId(pub u64);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -11,7 +13,7 @@ pub enum CycleDirection {
     Prev,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Project {
     pub id: ProjectId,
     pub name: String,

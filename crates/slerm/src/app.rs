@@ -1,6 +1,6 @@
 use gpui::{App, AppContext, Application, Bounds, WindowBounds, WindowOptions, px, size};
 
-use crate::{actions, keymap, ui::root::SlermApp};
+use crate::{actions, keymap, storage, ui::root::SlermApp};
 
 pub fn run() {
     Application::new().run(|cx: &mut App| {
@@ -16,7 +16,10 @@ pub fn run() {
                 app_id: Some("dev.slerm.Slerm".to_string()),
                 ..Default::default()
             },
-            |_, cx| cx.new(|cx| SlermApp::mock(cx)),
+            |_, cx| {
+                let workspace = storage::load_or_default();
+                cx.new(|cx| SlermApp::new(workspace, cx))
+            },
         )
         .expect("failed to open Slerm window");
 
