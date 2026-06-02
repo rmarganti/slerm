@@ -29,4 +29,12 @@ impl TerminalKind {
             Self::Task { .. } => "Tasks",
         }
     }
+
+    pub fn sidebar_order(&self) -> usize {
+        match self {
+            Self::Terminal => 0,
+            Self::Agent(_) => 1,
+            Self::Task { .. } => 2,
+        }
+    }
 }

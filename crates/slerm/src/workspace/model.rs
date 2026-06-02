@@ -1,5 +1,5 @@
 use crate::{
-    project::model::{Project, ProjectId},
+    project::model::{CycleDirection, Project, ProjectId},
     terminal::{
         instance::TerminalInstance,
         kind::{AgentKind, TaskStatus, TerminalKind},
@@ -127,5 +127,46 @@ impl WorkspaceState {
         self.projects
             .iter()
             .find(|project| project.id == active_project)
+    }
+
+    pub fn cycle_active_project(&mut self, direction: CycleDirection) {
+        if self.projects.is_empty() {
+            self.active_project = None;
+            return;
+        }
+
+        let next_index = self
+            .active_project
+            .and_then(|active_project| {
+                self.projects
+                    .iter()
+                    .position(|project| project.id == active_project)
+            })
+            .map(|active_index| match direction {
+                CycleDirection::Next => (active_index + 1) % self.projects.len(),
+                CycleDirection::Prev => active_index
+                    .checked_sub(1)
+                    .unwrap_or_else(|| self.projects.len() - 1),
+            })
+            .unwrap_or_else(|| match direction {
+                CycleDirection::Next => 0,
+                CycleDirection::Prev => self.projects.len() - 1,
+            });
+
+        self.active_project = Some(self.projects[next_index].id);
+    }
+
+    pub fn cycle_active_item(&mut self, direction: CycleDirection) {
+        let Some(active_project) = self.active_project else {
+            return;
+        };
+
+        if let Some(project) = self
+            .projects
+            .iter_mut()
+            .find(|project| project.id == active_project)
+        {
+            project.cycle_active_item(direction);
+        }
     }
 }
