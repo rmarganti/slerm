@@ -1,4 +1,4 @@
-use gpui::actions;
+use gpui::{Action, actions};
 
 actions!(
     slerm,
@@ -9,3 +9,9 @@ actions!(
         ActiveProjectCyclePrev,
     ]
 );
+
+#[derive(Clone, Debug, PartialEq, Action)]
+#[action(namespace = slerm, no_json)]
+pub struct ActiveItemSelectByIndex {
+    pub index: usize,
+}

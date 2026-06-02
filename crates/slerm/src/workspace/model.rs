@@ -169,4 +169,18 @@ impl WorkspaceState {
             project.cycle_active_item(direction);
         }
     }
+
+    pub fn select_active_item_by_sidebar_index(&mut self, index: usize) {
+        let Some(active_project) = self.active_project else {
+            return;
+        };
+
+        if let Some(project) = self
+            .projects
+            .iter_mut()
+            .find(|project| project.id == active_project)
+        {
+            project.select_active_item_by_sidebar_index(index);
+        }
+    }
 }

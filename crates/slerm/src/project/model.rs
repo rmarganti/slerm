@@ -67,9 +67,22 @@ impl Project {
         self.active_item = Some(item_ids[next_index]);
     }
 
-    fn item_ids_in_sidebar_order(&self) -> Vec<TerminalInstanceId> {
+    pub fn select_active_item_by_sidebar_index(&mut self, index: usize) {
+        if let Some(item_id) = self.item_ids_in_sidebar_order().get(index).copied() {
+            self.active_item = Some(item_id);
+        }
+    }
+
+    pub fn items_in_sidebar_order(&self) -> Vec<&TerminalInstance> {
         let mut items = self.items.iter().collect::<Vec<_>>();
         items.sort_by_key(|item| item.kind.sidebar_order());
-        items.into_iter().map(|item| item.id).collect()
+        items
+    }
+
+    fn item_ids_in_sidebar_order(&self) -> Vec<TerminalInstanceId> {
+        self.items_in_sidebar_order()
+            .into_iter()
+            .map(|item| item.id)
+            .collect()
     }
 }

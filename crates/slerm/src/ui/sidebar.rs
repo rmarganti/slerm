@@ -1,6 +1,6 @@
 use gpui::{App, Entity, FontWeight, IntoElement, RenderOnce, Window, div, prelude::*, px};
 
-use crate::{theme, workspace::model::WorkspaceState};
+use crate::{project::model::Project, theme, workspace::model::WorkspaceState};
 
 // ----------------------------------------------------------------
 // Sidebar
@@ -60,9 +60,9 @@ impl RenderOnce for Sidebar {
                             .child(project.path.display().to_string()),
                     ),
             )
-            .child(Section::new(&workspace, "Terminals"))
-            .child(Section::new(&workspace, "Agents"))
-            .child(Section::new(&workspace, "Tasks"))
+            .child(Section::new(project, "Terminals"))
+            .child(Section::new(project, "Agents"))
+            .child(Section::new(project, "Tasks"))
     }
 }
 
@@ -77,18 +77,18 @@ struct Section {
 }
 
 impl Section {
-    fn new(workspace: &WorkspaceState, label: &'static str) -> Self {
-        let items = workspace
-            .active_project()
+    fn new(project: &Project, label: &'static str) -> Self {
+        let items = project
+            .items_in_sidebar_order()
             .into_iter()
-            .flat_map(|project| {
-                project
-                    .items
-                    .iter()
-                    .filter(move |item| item.kind.section_label() == label)
-                    .map(move |item| {
-                        ItemRow::new(item.title.clone(), project.active_item == Some(item.id))
-                    })
+            .enumerate()
+            .filter(|(_, item)| item.kind.section_label() == label)
+            .map(|(index, item)| {
+                ItemRow::new(
+                    item.title.clone(),
+                    project.active_item == Some(item.id),
+                    (index < 9).then_some(index + 1),
+                )
             })
             .collect();
 
@@ -144,11 +144,16 @@ fn tracked_uppercase(label: &str) -> String {
 struct ItemRow {
     title: String,
     is_active: bool,
+    keybinding_index: Option<usize>,
 }
 
 impl ItemRow {
-    fn new(title: String, is_active: bool) -> Self {
-        Self { title, is_active }
+    fn new(title: String, is_active: bool, keybinding_index: Option<usize>) -> Self {
+        Self {
+            title,
+            is_active,
+            keybinding_index,
+        }
     }
 }
 
@@ -164,7 +169,19 @@ impl RenderOnce for ItemRow {
             } else {
                 theme.base
             })
-            .truncate()
-            .child(self.title)
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(div().text_color(theme.minus1).child("◦"))
+            .child(div().flex_1().truncate().child(self.title))
+            .when_some(self.keybinding_index, |row, index| {
+                row.child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.minus1)
+                        .child(format!("⌘{index}")),
+                )
+            })
     }
 }
