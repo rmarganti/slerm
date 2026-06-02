@@ -16,7 +16,7 @@ pub fn run() {
                 app_id: Some("dev.slerm.Slerm".to_string()),
                 ..Default::default()
             },
-            |_, cx| cx.new(|_| SlermApp),
+            |_, cx| cx.new(|cx| SlermApp::mock(cx)),
         )
         .expect("failed to open Slerm window");
 

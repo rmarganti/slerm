@@ -1,8 +1,22 @@
-use gpui::{Context, FontWeight, IntoElement, Render, Window, div, prelude::*};
+use gpui::{Context, Entity, IntoElement, Render, Window, div, prelude::*};
 
-use crate::theme;
+use crate::{
+    theme,
+    ui::{project_bar::ProjectBar, sidebar::Sidebar, terminal_pane::TerminalPane},
+    workspace::model::WorkspaceState,
+};
 
-pub struct SlermApp;
+pub struct SlermApp {
+    workspace: Entity<WorkspaceState>,
+}
+
+impl SlermApp {
+    pub fn mock(cx: &mut Context<Self>) -> Self {
+        Self {
+            workspace: cx.new(|_| WorkspaceState::mock()),
+        }
+    }
+}
 
 impl Render for SlermApp {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
@@ -12,22 +26,16 @@ impl Render for SlermApp {
             .size_full()
             .flex()
             .flex_col()
-            .items_center()
-            .justify_center()
-            .gap_3()
             .bg(theme.bg)
             .text_color(theme.fg)
             .child(
                 div()
-                    .text_2xl()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Slerm"),
+                    .flex()
+                    .flex_1()
+                    .overflow_hidden()
+                    .child(Sidebar::new(self.workspace.clone()))
+                    .child(TerminalPane::new(self.workspace.clone())),
             )
-            .child(
-                div()
-                    .text_sm()
-                    .text_color(theme.minus1)
-                    .child("A GPUI workspace ready to build on."),
-            )
+            .child(ProjectBar::new(self.workspace.clone()))
     }
 }
