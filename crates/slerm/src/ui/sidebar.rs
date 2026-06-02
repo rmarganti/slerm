@@ -110,10 +110,11 @@ impl RenderOnce for Section {
         let theme = theme::active();
 
         div()
-            .p_4()
+            .py_4()
             .child(
                 div()
                     .mb_1()
+                    .px_4()
                     .flex()
                     .items_center()
                     .gap_1()
@@ -163,6 +164,13 @@ impl RenderOnce for ItemRow {
 
         div()
             .py_1()
+            .px_4()
+            .border_l_2()
+            .border_color(if self.is_active {
+                theme.plus2
+            } else {
+                theme.bg
+            })
             .text_sm()
             .text_color(if self.is_active {
                 theme.plus2

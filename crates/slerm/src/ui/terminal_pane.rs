@@ -55,11 +55,7 @@ impl RenderOnce for TerminalPane {
             .child(
                 div()
                     .flex_1()
-                    .m_4()
                     .rounded_lg()
-                    .border_1()
-                    .border_color(theme.border)
-                    .bg(theme.bg)
                     .p_4()
                     .font_family("monospace")
                     .child(div().text_color(theme.minus1).child("# terminal preview"))
