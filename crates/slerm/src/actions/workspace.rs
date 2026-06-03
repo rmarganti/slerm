@@ -5,6 +5,7 @@ actions!(
     [
         ActiveItemCycleNext,
         ActiveItemCyclePrev,
+        ActiveItemClose,
         ActiveProjectCycleNext,
         ActiveProjectCyclePrev,
         OpenAddItemPicker,

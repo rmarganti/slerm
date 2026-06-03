@@ -2,8 +2,8 @@ use gpui::{App, KeyBinding};
 
 use crate::{
     actions::{
-        ActiveItemCycleNext, ActiveItemCyclePrev, ActiveItemSelectByIndex, ActiveProjectCycleNext,
-        ActiveProjectCyclePrev, OpenAddItemPicker, Quit,
+        ActiveItemClose, ActiveItemCycleNext, ActiveItemCyclePrev, ActiveItemSelectByIndex,
+        ActiveProjectCycleNext, ActiveProjectCyclePrev, OpenAddItemPicker, Quit,
     },
     ui::{
         fuzzy_finder::{
@@ -25,6 +25,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("ctrl-q", Quit, None),
         KeyBinding::new("cmd-t", OpenAddItemPicker, Some(WORKSPACE_CONTEXT)),
+        KeyBinding::new("cmd-w", ActiveItemClose, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-down", ActiveItemCycleNext, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-j", ActiveItemCycleNext, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-up", ActiveItemCyclePrev, Some(WORKSPACE_CONTEXT)),

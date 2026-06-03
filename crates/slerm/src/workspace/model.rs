@@ -219,4 +219,18 @@ impl WorkspaceState {
             project.select_active_item_by_sidebar_index(index);
         }
     }
+
+    pub fn close_active_item(&mut self) {
+        let Some(active_project) = self.active_project else {
+            return;
+        };
+
+        if let Some(project) = self
+            .projects
+            .iter_mut()
+            .find(|project| project.id == active_project)
+        {
+            project.close_active_item();
+        }
+    }
 }

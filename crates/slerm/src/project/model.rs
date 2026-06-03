@@ -75,6 +75,27 @@ impl Project {
         }
     }
 
+    pub fn close_active_item(&mut self) {
+        let Some(active_item) = self.active_item else {
+            return;
+        };
+
+        let item_ids = self.item_ids_in_sidebar_order();
+        let closed_index = item_ids
+            .iter()
+            .position(|item_id| *item_id == active_item)
+            .unwrap_or(0);
+
+        self.items.retain(|item| item.id != active_item);
+
+        let remaining_item_ids = self.item_ids_in_sidebar_order();
+        self.active_item = if remaining_item_ids.is_empty() {
+            None
+        } else {
+            Some(remaining_item_ids[closed_index.min(remaining_item_ids.len() - 1)])
+        };
+    }
+
     pub fn add_item(&mut self, item: TerminalInstance) {
         self.active_item = Some(item.id);
         self.items.push(item);

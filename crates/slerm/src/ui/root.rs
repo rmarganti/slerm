@@ -2,8 +2,8 @@ use gpui::{Context, Entity, FocusHandle, Focusable, IntoElement, Render, Window,
 
 use crate::{
     actions::{
-        ActiveItemCycleNext, ActiveItemCyclePrev, ActiveItemSelectByIndex, ActiveProjectCycleNext,
-        ActiveProjectCyclePrev, OpenAddItemPicker,
+        ActiveItemClose, ActiveItemCycleNext, ActiveItemCyclePrev, ActiveItemSelectByIndex,
+        ActiveProjectCycleNext, ActiveProjectCyclePrev, OpenAddItemPicker,
     },
     project::model::CycleDirection,
     storage, theme,
@@ -34,6 +34,10 @@ impl SlermApp {
 }
 
 impl SlermApp {
+    fn active_item_close(&mut self, _: &ActiveItemClose, _: &mut Window, cx: &mut Context<Self>) {
+        self.close_active_item(cx);
+    }
+
     fn active_item_cycle_next(
         &mut self,
         _: &ActiveItemCycleNext,
@@ -113,6 +117,12 @@ impl SlermApp {
         self.cycle_active_project(CycleDirection::Prev, cx);
     }
 
+    fn close_active_item(&mut self, cx: &mut Context<Self>) {
+        self.update_workspace(cx, |workspace| {
+            workspace.close_active_item();
+        });
+    }
+
     fn cycle_active_item(&mut self, direction: CycleDirection, cx: &mut Context<Self>) {
         self.update_workspace(cx, |workspace| {
             workspace.cycle_active_item(direction);
@@ -166,6 +176,7 @@ impl Render for SlermApp {
         div()
             .key_context("workspace")
             .track_focus(&self.focus_handle)
+            .on_action(cx.listener(Self::active_item_close))
             .on_action(cx.listener(Self::active_item_cycle_next))
             .on_action(cx.listener(Self::active_item_cycle_prev))
             .on_action(cx.listener(Self::active_item_select_by_index))
