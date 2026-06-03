@@ -3,17 +3,24 @@ use gpui::{Context, Entity, FocusHandle, Focusable, IntoElement, Render, Window,
 use crate::{
     actions::{
         ActiveItemCycleNext, ActiveItemCyclePrev, ActiveItemSelectByIndex, ActiveProjectCycleNext,
-        ActiveProjectCyclePrev,
+        ActiveProjectCyclePrev, OpenAddItemPicker,
     },
     project::model::CycleDirection,
     storage, theme,
-    ui::{project_bar::ProjectBar, sidebar::Sidebar, terminal_pane::TerminalPane},
+    ui::{
+        add_item_picker::AddItemPicker,
+        modal_layer::{ActiveModal, ModalLayer},
+        project_bar::ProjectBar,
+        sidebar::Sidebar,
+        terminal_pane::TerminalPane,
+    },
     workspace::model::WorkspaceState,
 };
 
 pub struct SlermApp {
     workspace: Entity<WorkspaceState>,
     focus_handle: FocusHandle,
+    active_modal: Option<ActiveModal>,
 }
 
 impl SlermApp {
@@ -21,6 +28,7 @@ impl SlermApp {
         Self {
             workspace: cx.new(|_| workspace),
             focus_handle: cx.focus_handle(),
+            active_modal: None,
         }
     }
 }
@@ -51,6 +59,40 @@ impl SlermApp {
         cx: &mut Context<Self>,
     ) {
         self.cycle_active_project(CycleDirection::Next, cx);
+    }
+
+    fn open_add_item_picker(
+        &mut self,
+        _: &OpenAddItemPicker,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let app = cx.entity();
+        let workspace = self.workspace.clone();
+        let picker = cx.new(|cx| {
+            AddItemPicker::new(
+                workspace,
+                move |window, cx| {
+                    app.update(cx, |app, cx| {
+                        app.active_modal = None;
+                        app.focus_handle.focus(window);
+                        cx.notify();
+                    });
+                },
+                cx,
+            )
+        });
+        self.active_modal = Some(ActiveModal::AddItemPicker(picker));
+        cx.notify();
+        if let Some(ActiveModal::AddItemPicker(picker)) = &self.active_modal {
+            picker.read(cx).focus_handle(cx).focus(window);
+        }
+    }
+
+    fn dismiss_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.active_modal = None;
+        self.focus_handle.focus(window);
+        cx.notify();
     }
 
     fn active_item_select_by_index(
@@ -129,6 +171,7 @@ impl Render for SlermApp {
             .on_action(cx.listener(Self::active_item_select_by_index))
             .on_action(cx.listener(Self::active_project_cycle_next))
             .on_action(cx.listener(Self::active_project_cycle_prev))
+            .on_action(cx.listener(Self::open_add_item_picker))
             .size_full()
             .flex()
             .flex_col()
@@ -143,5 +186,11 @@ impl Render for SlermApp {
                     .child(TerminalPane::new(self.workspace.clone())),
             )
             .child(ProjectBar::new(self.workspace.clone()))
+            .child(ModalLayer::new(self.active_modal.clone(), {
+                let app = cx.entity();
+                move |window, cx| {
+                    app.update(cx, |app, cx| app.dismiss_modal(window, cx));
+                }
+            }))
     }
 }

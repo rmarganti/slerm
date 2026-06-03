@@ -7,6 +7,7 @@ actions!(
         ActiveItemCyclePrev,
         ActiveProjectCycleNext,
         ActiveProjectCyclePrev,
+        OpenAddItemPicker,
     ]
 );
 

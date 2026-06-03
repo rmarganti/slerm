@@ -131,6 +131,40 @@ impl WorkspaceState {
             .find(|project| project.id == active_project)
     }
 
+    pub fn add_terminal_to_active_project(
+        &mut self,
+    ) -> Option<crate::terminal::instance::TerminalInstanceId> {
+        let active_project = self.active_project?;
+        let next_id = self.next_terminal_instance_id();
+        let project = self
+            .projects
+            .iter_mut()
+            .find(|project| project.id == active_project)?;
+
+        let terminal = TerminalInstance::new(
+            next_id.0,
+            project.id,
+            TerminalKind::Terminal,
+            "shell",
+            project.path.clone(),
+            None::<String>,
+        );
+        project.add_item(terminal);
+        Some(next_id)
+    }
+
+    fn next_terminal_instance_id(&self) -> crate::terminal::instance::TerminalInstanceId {
+        crate::terminal::instance::TerminalInstanceId(
+            self.projects
+                .iter()
+                .flat_map(|project| project.items.iter())
+                .map(|item| item.id.0)
+                .max()
+                .unwrap_or(0)
+                + 1,
+        )
+    }
+
     pub fn cycle_active_project(&mut self, direction: CycleDirection) {
         if self.projects.is_empty() {
             self.active_project = None;

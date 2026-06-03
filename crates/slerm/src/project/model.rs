@@ -75,6 +75,11 @@ impl Project {
         }
     }
 
+    pub fn add_item(&mut self, item: TerminalInstance) {
+        self.active_item = Some(item.id);
+        self.items.push(item);
+    }
+
     pub fn items_in_sidebar_order(&self) -> Vec<&TerminalInstance> {
         let mut items = self.items.iter().collect::<Vec<_>>();
         items.sort_by_key(|item| item.kind.sidebar_order());
