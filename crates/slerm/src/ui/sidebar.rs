@@ -11,6 +11,7 @@ use crate::{
 // Sidebar
 // ----------------------------------------------------------------
 
+/// Left navigation for the active project's terminals grouped by extension.
 #[derive(IntoElement)]
 pub struct Sidebar {
     workspace: Entity<WorkspaceState>,
@@ -77,6 +78,7 @@ impl RenderOnce for Sidebar {
 // Section
 // ----------------------------------------------------------------
 
+/// One sidebar group, such as plain terminals, agents, or tasks.
 #[derive(IntoElement)]
 struct Section {
     label: &'static str,
@@ -152,6 +154,7 @@ fn tracked_uppercase(label: &str) -> String {
 // TerminalRow
 // ----------------------------------------------------------------
 
+/// Sidebar row for selecting a terminal and showing its attention state.
 #[derive(IntoElement)]
 struct TerminalRow {
     title: String,

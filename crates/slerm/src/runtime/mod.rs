@@ -9,9 +9,11 @@ use crate::{
     workspace::model::WorkspaceState,
 };
 
+/// Runtime-only identifier for a spawned terminal session.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct SessionId(pub u64);
 
+/// Live process/session metadata for a terminal after it has been spawned.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalSession {
     pub id: SessionId,
@@ -19,6 +21,7 @@ pub struct TerminalSession {
     pub started_at: SystemTime,
 }
 
+/// Runtime lifecycle state for a terminal's process.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalSessionState {
     pub session: Option<TerminalSession>,
@@ -38,6 +41,7 @@ impl TerminalSessionState {
     }
 }
 
+/// Coarse lifecycle state of the process backing a terminal.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TerminalRunStatus {
     NotStarted,
@@ -47,6 +51,10 @@ pub enum TerminalRunStatus {
     FailedToStart,
 }
 
+/// Runtime companion to `TerminalSpec` for one terminal.
+///
+/// This joins process/session state with extension-specific live state while the
+/// persisted terminal spec remains launch/config intent.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalRuntimeState {
     pub terminal_id: TerminalId,
@@ -64,6 +72,7 @@ impl TerminalRuntimeState {
     }
 }
 
+/// Live semantic state for a terminal extension.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TerminalExtensionRuntime {
     Plain,
@@ -81,6 +90,7 @@ impl TerminalExtensionRuntime {
     }
 }
 
+/// Runtime interpretation of an agent terminal's current state.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentRuntime {
     pub status: AgentStatus,
@@ -98,6 +108,7 @@ impl Default for AgentRuntime {
     }
 }
 
+/// Agent-specific status derived from process state and output detection.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AgentStatus {
     Unknown,
@@ -107,6 +118,7 @@ pub enum AgentStatus {
     Errored,
 }
 
+/// Runtime lifecycle state for a task terminal.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TaskRuntime {
     pub status: TaskStatus,
@@ -124,6 +136,7 @@ impl Default for TaskRuntime {
     }
 }
 
+/// Task-specific status for command execution and restart behavior.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TaskStatus {
     PendingManualStart,
@@ -134,6 +147,7 @@ pub enum TaskStatus {
     Stopped,
 }
 
+/// Serializable-ish snapshot of how a spawned process finished.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExitStatusSnapshot {
     pub code: Option<i32>,
@@ -142,6 +156,10 @@ pub struct ExitStatusSnapshot {
     pub finished_at: SystemTime,
 }
 
+/// Derived UI status for a terminal.
+///
+/// This intentionally composes lifecycle, activity, outcome, and attention so a
+/// terminal can express combinations like "running and awaiting review".
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TerminalStatus {
     pub run: TerminalRunStatus,
@@ -260,6 +278,7 @@ impl TerminalStatus {
     }
 }
 
+/// User-facing activity signal derived from agent/task runtime state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalActivityStatus {
     None,
@@ -268,6 +287,7 @@ pub enum TerminalActivityStatus {
     AwaitingReview,
 }
 
+/// User-facing outcome signal derived from process or task completion.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalOutcomeStatus {
     None,
@@ -276,12 +296,14 @@ pub enum TerminalOutcomeStatus {
     Stopped,
 }
 
+/// Aggregated attention signal used for terminal and project badges.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AttentionState {
     pub severity: AttentionSeverity,
     pub reasons: Vec<AttentionReason>,
 }
 
+/// Ordering of attention levels; higher severities dominate aggregates.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum AttentionSeverity {
     None,
@@ -291,6 +313,7 @@ pub enum AttentionSeverity {
     Error,
 }
 
+/// Concrete reason a terminal is surfacing attention.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AttentionReason {
     AgentWorking,
@@ -302,12 +325,14 @@ pub enum AttentionReason {
     TerminalExited,
 }
 
+/// Attention summary for a project, derived from its terminals.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectAttention {
     pub severity: AttentionSeverity,
     pub reasons: Vec<ProjectAttentionReason>,
 }
 
+/// A terminal-scoped reason contributing to project-level attention.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectAttentionReason {
     pub terminal_id: TerminalId,
@@ -349,6 +374,7 @@ pub trait PtyBackend {
     fn write(&mut self, session_id: SessionId, bytes: &[u8]) -> anyhow::Result<()>;
 }
 
+/// Backend spawn request built from a persisted terminal spec and desired size.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SpawnProcessRequest {
     pub terminal_id: TerminalId,
@@ -370,6 +396,7 @@ impl SpawnProcessRequest {
     }
 }
 
+/// Terminal grid dimensions in character cells.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerminalSize {
     pub columns: u16,
@@ -387,6 +414,7 @@ impl TerminalSize {
     }
 }
 
+/// In-memory backend for exercising runtime service behavior before real PTY integration.
 #[derive(Clone, Debug)]
 pub struct MockPtyBackend {
     next_session_id: u64,
@@ -444,6 +472,10 @@ impl PtyBackend for MockPtyBackend {
     }
 }
 
+/// Owns live runtime state for all known terminals.
+///
+/// The service is initialized from persisted specs, then updated by spawning,
+/// killing, status detection, and future task/agent runtime events.
 #[derive(Clone, Debug, Default)]
 pub struct TerminalRuntimeService {
     states: BTreeMap<TerminalId, TerminalRuntimeState>,

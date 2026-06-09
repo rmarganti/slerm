@@ -4,9 +4,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::{project::model::ProjectId, terminal::extension::TerminalExtensionSpec};
 
+/// Stable persisted identifier for a terminal within the workspace.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct TerminalId(pub u64);
 
+/// Structured process launch intent for a terminal.
+///
+/// This is persisted configuration, not a live process handle. A plain terminal
+/// launches the user's shell, while agents and tasks launch their configured CLI
+/// or command with explicit arguments and environment overrides.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ProcessSpec {
     pub program: PathBuf,
@@ -54,6 +60,11 @@ fn quote_command_part(part: &str) -> String {
     }
 }
 
+/// Persisted configuration for one terminal-like unit in Slerm.
+///
+/// Every sidebar entry is a terminal at its core. Semantic behavior such as
+/// "agent" or "task" lives in `extension`; live sessions and statuses live in
+/// runtime state instead of this saved spec.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TerminalSpec {
     pub id: TerminalId,

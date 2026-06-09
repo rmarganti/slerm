@@ -6,6 +6,7 @@ use crate::{
     workspace::model::WorkspaceState,
 };
 
+/// Bottom project switcher with attention indicators for inactive projects.
 #[derive(IntoElement)]
 pub struct ProjectBar {
     workspace: Entity<WorkspaceState>,

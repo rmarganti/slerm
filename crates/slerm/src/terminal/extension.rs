@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+/// Persisted agent-specific configuration for a terminal.
+///
+/// The process to launch is still stored on `TerminalSpec`; this only describes
+/// how Slerm should interpret that terminal as an agent.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AgentSpec {
     pub kind: AgentKind,
@@ -15,6 +19,7 @@ impl AgentSpec {
     }
 }
 
+/// Built-in agent families Slerm can recognize, plus custom agent labels.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum AgentKind {
     Codex,
@@ -23,11 +28,16 @@ pub enum AgentKind {
     Custom(String),
 }
 
+/// Persisted hints for deriving an agent's live status from terminal output.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AgentDetectionSpec {
     pub prompt_patterns: Vec<String>,
 }
 
+/// Persisted task behavior for a terminal that represents a repeatable command.
+///
+/// Runtime task state such as running, succeeded, or failed is intentionally not
+/// saved here so stale process state is not restored on app launch.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TaskSpec {
     pub restart: RestartPolicy,
@@ -45,6 +55,7 @@ impl Default for TaskSpec {
     }
 }
 
+/// How Slerm should restart a task after its process exits.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum RestartPolicy {
     Never,
@@ -52,12 +63,14 @@ pub enum RestartPolicy {
     Always,
 }
 
+/// Whether a completed task terminal remains in the project model.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum TaskPersistence {
     KeepUntilClosed,
     CloseOnSuccess,
 }
 
+/// Which task outcomes should surface user attention.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum TaskNotifyPolicy {
     Never,
@@ -65,6 +78,10 @@ pub enum TaskNotifyPolicy {
     OnCompletion,
 }
 
+/// Persisted semantic extension for a terminal.
+///
+/// `Plain` terminals have no extra semantics. `Agent` and `Task` terminals use
+/// the same terminal/process foundation but opt into agent or task behavior.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum TerminalExtensionSpec {
     Plain,

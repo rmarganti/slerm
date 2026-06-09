@@ -4,15 +4,21 @@ use serde::{Deserialize, Serialize};
 
 use crate::terminal::instance::{TerminalId, TerminalSpec};
 
+/// Stable persisted identifier for a top-level project.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct ProjectId(pub u64);
 
+/// Direction for keyboard-driven cycling through projects or terminals.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CycleDirection {
     Next,
     Prev,
 }
 
+/// Persisted project workspace containing ordered terminal specs and selection.
+///
+/// Projects are Slerm's top-level navigation units. Only one project is active
+/// in the main workspace, while inactive projects can still surface attention.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Project {
     pub id: ProjectId,

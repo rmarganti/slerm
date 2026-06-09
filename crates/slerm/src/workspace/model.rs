@@ -8,6 +8,11 @@ use crate::{
     },
 };
 
+/// Persisted workspace model for projects and active project selection.
+///
+/// This state describes what Slerm should know across launches. Live terminal
+/// sessions, process handles, task status, and agent status belong in runtime
+/// services instead.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WorkspaceState {
     pub projects: Vec<Project>,

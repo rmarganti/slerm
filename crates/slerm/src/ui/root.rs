@@ -19,6 +19,10 @@ use crate::{
     workspace::model::WorkspaceState,
 };
 
+/// Root GPUI model for a Slerm window.
+///
+/// It keeps persisted workspace state separate from live terminal runtime state
+/// while coordinating keyboard actions, modal UI, and child views.
 pub struct SlermApp {
     workspace: Entity<WorkspaceState>,
     runtime: Entity<TerminalRuntimeService>,

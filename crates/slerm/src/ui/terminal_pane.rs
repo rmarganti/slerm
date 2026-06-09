@@ -2,6 +2,10 @@ use gpui::{App, Entity, FontWeight, IntoElement, RenderOnce, Window, div, prelud
 
 use crate::{theme, workspace::model::WorkspaceState};
 
+/// Main terminal viewport for the active project's active terminal.
+///
+/// This is currently a preview shell; libghostty-backed rendering should replace
+/// the placeholder while continuing to read selection from workspace state.
 #[derive(IntoElement)]
 pub struct TerminalPane {
     workspace: Entity<WorkspaceState>,
