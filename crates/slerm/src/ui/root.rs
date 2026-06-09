@@ -4,7 +4,7 @@ use crate::{
     actions::{
         ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveProjectSelectByIndex,
         ActiveTerminalClose, ActiveTerminalCycleNext, ActiveTerminalCyclePrev,
-        ActiveTerminalSelectByIndex, OpenAddTerminalPicker,
+        ActiveTerminalSelectByIndex, OpenAddTerminalPicker, OpenProjectPicker,
     },
     project::model::CycleDirection,
     runtime::TerminalRuntimeService,
@@ -13,6 +13,7 @@ use crate::{
         add_terminal_picker::AddTerminalPicker,
         modal_layer::{ActiveModal, ModalLayer},
         project_bar::ProjectBar,
+        project_picker::ProjectPicker,
         sidebar::Sidebar,
         terminal_pane::TerminalPane,
     },
@@ -106,6 +107,34 @@ impl SlermApp {
         self.active_modal = Some(ActiveModal::AddTerminalPicker(picker));
         cx.notify();
         if let Some(ActiveModal::AddTerminalPicker(picker)) = &self.active_modal {
+            picker.read(cx).focus_handle(cx).focus(window);
+        }
+    }
+
+    fn open_project_picker(
+        &mut self,
+        _: &OpenProjectPicker,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let app = cx.entity();
+        let workspace = self.workspace.clone();
+        let picker = cx.new(|cx| {
+            ProjectPicker::new(
+                workspace,
+                move |window, cx| {
+                    app.update(cx, |app, cx| {
+                        app.active_modal = None;
+                        app.focus_handle.focus(window);
+                        cx.notify();
+                    });
+                },
+                cx,
+            )
+        });
+        self.active_modal = Some(ActiveModal::ProjectPicker(picker));
+        cx.notify();
+        if let Some(ActiveModal::ProjectPicker(picker)) = &self.active_modal {
             picker.read(cx).focus_handle(cx).focus(window);
         }
     }
@@ -224,6 +253,7 @@ impl Render for SlermApp {
             .on_action(cx.listener(Self::active_project_cycle_prev))
             .on_action(cx.listener(Self::active_project_select_by_index))
             .on_action(cx.listener(Self::open_add_terminal_picker))
+            .on_action(cx.listener(Self::open_project_picker))
             .size_full()
             .flex()
             .flex_col()

@@ -90,7 +90,7 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
             .iter()
             .enumerate()
             .filter_map(|(item_index, item)| {
-                fuzzy_score(query, &item.title).map(|score| FuzzyMatch { item_index, score })
+                fuzzy_item_score(query, item).map(|score| FuzzyMatch { item_index, score })
             })
             .collect::<Vec<_>>();
 
@@ -230,6 +230,18 @@ impl<T: Clone + 'static> Render for FuzzyFinder<T> {
     }
 }
 
+fn fuzzy_item_score<T>(query: &str, item: &FuzzyFinderItem<T>) -> Option<i64> {
+    let title_score = fuzzy_score(query, &item.title);
+    let subtitle_score = item
+        .subtitle
+        .as_ref()
+        .and_then(|subtitle| fuzzy_score(query, subtitle))
+        // Prefer title matches over equally good subtitle/path matches.
+        .map(|score| score - 10);
+
+    title_score.into_iter().chain(subtitle_score).max()
+}
+
 fn fuzzy_score(query: &str, candidate: &str) -> Option<i64> {
     let query = query.trim().to_lowercase();
     if query.is_empty() {
@@ -271,12 +283,21 @@ fn fuzzy_score(query: &str, candidate: &str) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::fuzzy_score;
+    use super::{FuzzyFinderItem, fuzzy_item_score, fuzzy_score};
 
     #[test]
     fn fuzzy_score_matches_subsequences() {
         assert!(fuzzy_score("term", "Terminal").is_some());
         assert!(fuzzy_score("tml", "Terminal").is_some());
         assert!(fuzzy_score("xyz", "Terminal").is_none());
+    }
+
+    #[test]
+    fn fuzzy_item_score_matches_subtitles() {
+        let item = FuzzyFinderItem::new("slerm", Some("/Users/rmarganti/code/rmarganti/slerm"), ());
+
+        assert!(fuzzy_item_score("code", &item).is_some());
+        assert!(fuzzy_item_score("rm/sl", &item).is_some());
+        assert!(fuzzy_item_score("zed", &item).is_none());
     }
 }

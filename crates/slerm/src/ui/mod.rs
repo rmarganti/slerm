@@ -3,6 +3,7 @@ pub mod attention;
 pub mod fuzzy_finder;
 pub mod modal_layer;
 pub mod project_bar;
+pub mod project_picker;
 pub mod root;
 pub mod sidebar;
 pub mod terminal_pane;
