@@ -2,9 +2,9 @@ use gpui::{Context, Entity, FocusHandle, Focusable, IntoElement, Render, Window,
 
 use crate::{
     actions::{
-        ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveTerminalClose,
-        ActiveTerminalCycleNext, ActiveTerminalCyclePrev, ActiveTerminalSelectByIndex,
-        OpenAddTerminalPicker,
+        ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveProjectSelectByIndex,
+        ActiveTerminalClose, ActiveTerminalCycleNext, ActiveTerminalCyclePrev,
+        ActiveTerminalSelectByIndex, OpenAddTerminalPicker,
     },
     project::model::CycleDirection,
     runtime::TerminalRuntimeService,
@@ -125,6 +125,15 @@ impl SlermApp {
         self.select_active_terminal_by_sidebar_index(action.index, cx);
     }
 
+    fn active_project_select_by_index(
+        &mut self,
+        action: &ActiveProjectSelectByIndex,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.select_active_project_by_index(action.index, cx);
+    }
+
     fn active_project_cycle_prev(
         &mut self,
         _: &ActiveProjectCyclePrev,
@@ -161,6 +170,12 @@ impl SlermApp {
     fn select_active_terminal_by_sidebar_index(&mut self, index: usize, cx: &mut Context<Self>) {
         self.update_workspace(cx, |workspace| {
             workspace.select_active_terminal_by_sidebar_index(index);
+        });
+    }
+
+    fn select_active_project_by_index(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.update_workspace(cx, |workspace| {
+            workspace.select_active_project_by_index(index);
         });
     }
 
@@ -207,6 +222,7 @@ impl Render for SlermApp {
             .on_action(cx.listener(Self::active_terminal_select_by_index))
             .on_action(cx.listener(Self::active_project_cycle_next))
             .on_action(cx.listener(Self::active_project_cycle_prev))
+            .on_action(cx.listener(Self::active_project_select_by_index))
             .on_action(cx.listener(Self::open_add_terminal_picker))
             .size_full()
             .flex()

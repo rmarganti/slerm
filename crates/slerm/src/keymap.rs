@@ -2,9 +2,9 @@ use gpui::{App, KeyBinding};
 
 use crate::{
     actions::{
-        ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveTerminalClose,
-        ActiveTerminalCycleNext, ActiveTerminalCyclePrev, ActiveTerminalSelectByIndex,
-        OpenAddTerminalPicker, Quit,
+        ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveProjectSelectByIndex,
+        ActiveTerminalClose, ActiveTerminalCycleNext, ActiveTerminalCyclePrev,
+        ActiveTerminalSelectByIndex, OpenAddTerminalPicker, Quit,
     },
     ui::{
         fuzzy_finder::{
@@ -80,6 +80,51 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-l", ActiveProjectCycleNext, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-left", ActiveProjectCyclePrev, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-h", ActiveProjectCyclePrev, Some(WORKSPACE_CONTEXT)),
+        KeyBinding::new(
+            "cmd-shift-1",
+            ActiveProjectSelectByIndex { index: 0 },
+            Some(WORKSPACE_CONTEXT),
+        ),
+        KeyBinding::new(
+            "cmd-shift-2",
+            ActiveProjectSelectByIndex { index: 1 },
+            Some(WORKSPACE_CONTEXT),
+        ),
+        KeyBinding::new(
+            "cmd-shift-3",
+            ActiveProjectSelectByIndex { index: 2 },
+            Some(WORKSPACE_CONTEXT),
+        ),
+        KeyBinding::new(
+            "cmd-shift-4",
+            ActiveProjectSelectByIndex { index: 3 },
+            Some(WORKSPACE_CONTEXT),
+        ),
+        KeyBinding::new(
+            "cmd-shift-5",
+            ActiveProjectSelectByIndex { index: 4 },
+            Some(WORKSPACE_CONTEXT),
+        ),
+        KeyBinding::new(
+            "cmd-shift-6",
+            ActiveProjectSelectByIndex { index: 5 },
+            Some(WORKSPACE_CONTEXT),
+        ),
+        KeyBinding::new(
+            "cmd-shift-7",
+            ActiveProjectSelectByIndex { index: 6 },
+            Some(WORKSPACE_CONTEXT),
+        ),
+        KeyBinding::new(
+            "cmd-shift-8",
+            ActiveProjectSelectByIndex { index: 7 },
+            Some(WORKSPACE_CONTEXT),
+        ),
+        KeyBinding::new(
+            "cmd-shift-9",
+            ActiveProjectSelectByIndex { index: 8 },
+            Some(WORKSPACE_CONTEXT),
+        ),
         KeyBinding::new("left", TextInputMoveLeft, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("ctrl-b", TextInputMoveLeft, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("right", TextInputMoveRight, Some(TEXT_INPUT_CONTEXT)),
