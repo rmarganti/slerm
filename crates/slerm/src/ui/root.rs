@@ -2,13 +2,15 @@ use gpui::{Context, Entity, FocusHandle, Focusable, IntoElement, Render, Window,
 
 use crate::{
     actions::{
-        ActiveItemClose, ActiveItemCycleNext, ActiveItemCyclePrev, ActiveItemSelectByIndex,
-        ActiveProjectCycleNext, ActiveProjectCyclePrev, OpenAddItemPicker,
+        ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveTerminalClose,
+        ActiveTerminalCycleNext, ActiveTerminalCyclePrev, ActiveTerminalSelectByIndex,
+        OpenAddTerminalPicker,
     },
     project::model::CycleDirection,
+    runtime::TerminalRuntimeService,
     storage, theme,
     ui::{
-        add_item_picker::AddItemPicker,
+        add_terminal_picker::AddTerminalPicker,
         modal_layer::{ActiveModal, ModalLayer},
         project_bar::ProjectBar,
         sidebar::Sidebar,
@@ -17,16 +19,24 @@ use crate::{
     workspace::model::WorkspaceState,
 };
 
+/// Root GPUI model for a Slerm window.
+///
+/// It keeps persisted workspace state separate from live terminal runtime state
+/// while coordinating keyboard actions, modal UI, and child views.
 pub struct SlermApp {
     workspace: Entity<WorkspaceState>,
+    runtime: Entity<TerminalRuntimeService>,
     focus_handle: FocusHandle,
     active_modal: Option<ActiveModal>,
 }
 
 impl SlermApp {
     pub fn new(workspace: WorkspaceState, cx: &mut Context<Self>) -> Self {
+        let runtime = TerminalRuntimeService::from_workspace(&workspace);
+
         Self {
             workspace: cx.new(|_| workspace),
+            runtime: cx.new(|_| runtime),
             focus_handle: cx.focus_handle(),
             active_modal: None,
         }
@@ -34,26 +44,31 @@ impl SlermApp {
 }
 
 impl SlermApp {
-    fn active_item_close(&mut self, _: &ActiveItemClose, _: &mut Window, cx: &mut Context<Self>) {
-        self.close_active_item(cx);
-    }
-
-    fn active_item_cycle_next(
+    fn active_terminal_close(
         &mut self,
-        _: &ActiveItemCycleNext,
+        _: &ActiveTerminalClose,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.cycle_active_item(CycleDirection::Next, cx);
+        self.close_active_terminal(cx);
     }
 
-    fn active_item_cycle_prev(
+    fn active_terminal_cycle_next(
         &mut self,
-        _: &ActiveItemCyclePrev,
+        _: &ActiveTerminalCycleNext,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.cycle_active_item(CycleDirection::Prev, cx);
+        self.cycle_active_terminal(CycleDirection::Next, cx);
+    }
+
+    fn active_terminal_cycle_prev(
+        &mut self,
+        _: &ActiveTerminalCyclePrev,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.cycle_active_terminal(CycleDirection::Prev, cx);
     }
 
     fn active_project_cycle_next(
@@ -65,17 +80,19 @@ impl SlermApp {
         self.cycle_active_project(CycleDirection::Next, cx);
     }
 
-    fn open_add_item_picker(
+    fn open_add_terminal_picker(
         &mut self,
-        _: &OpenAddItemPicker,
+        _: &OpenAddTerminalPicker,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let app = cx.entity();
         let workspace = self.workspace.clone();
+        let runtime = self.runtime.clone();
         let picker = cx.new(|cx| {
-            AddItemPicker::new(
+            AddTerminalPicker::new(
                 workspace,
+                runtime,
                 move |window, cx| {
                     app.update(cx, |app, cx| {
                         app.active_modal = None;
@@ -86,9 +103,9 @@ impl SlermApp {
                 cx,
             )
         });
-        self.active_modal = Some(ActiveModal::AddItemPicker(picker));
+        self.active_modal = Some(ActiveModal::AddTerminalPicker(picker));
         cx.notify();
-        if let Some(ActiveModal::AddItemPicker(picker)) = &self.active_modal {
+        if let Some(ActiveModal::AddTerminalPicker(picker)) = &self.active_modal {
             picker.read(cx).focus_handle(cx).focus(window);
         }
     }
@@ -99,13 +116,13 @@ impl SlermApp {
         cx.notify();
     }
 
-    fn active_item_select_by_index(
+    fn active_terminal_select_by_index(
         &mut self,
-        action: &ActiveItemSelectByIndex,
+        action: &ActiveTerminalSelectByIndex,
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.select_active_item_by_sidebar_index(action.index, cx);
+        self.select_active_terminal_by_sidebar_index(action.index, cx);
     }
 
     fn active_project_cycle_prev(
@@ -117,15 +134,21 @@ impl SlermApp {
         self.cycle_active_project(CycleDirection::Prev, cx);
     }
 
-    fn close_active_item(&mut self, cx: &mut Context<Self>) {
-        self.update_workspace(cx, |workspace| {
-            workspace.close_active_item();
-        });
+    fn close_active_terminal(&mut self, cx: &mut Context<Self>) {
+        let closed_terminal =
+            self.update_workspace(cx, |workspace| workspace.close_active_terminal());
+
+        if let Some(terminal_id) = closed_terminal {
+            self.runtime.update(cx, |runtime, cx| {
+                runtime.remove_terminal(terminal_id);
+                cx.notify();
+            });
+        }
     }
 
-    fn cycle_active_item(&mut self, direction: CycleDirection, cx: &mut Context<Self>) {
+    fn cycle_active_terminal(&mut self, direction: CycleDirection, cx: &mut Context<Self>) {
         self.update_workspace(cx, |workspace| {
-            workspace.cycle_active_item(direction);
+            workspace.cycle_active_terminal(direction);
         });
     }
 
@@ -135,20 +158,21 @@ impl SlermApp {
         });
     }
 
-    fn select_active_item_by_sidebar_index(&mut self, index: usize, cx: &mut Context<Self>) {
+    fn select_active_terminal_by_sidebar_index(&mut self, index: usize, cx: &mut Context<Self>) {
         self.update_workspace(cx, |workspace| {
-            workspace.select_active_item_by_sidebar_index(index);
+            workspace.select_active_terminal_by_sidebar_index(index);
         });
     }
 
-    fn update_workspace(
+    fn update_workspace<T>(
         &mut self,
         cx: &mut Context<Self>,
-        update: impl FnOnce(&mut WorkspaceState),
-    ) {
-        self.workspace.update(cx, |workspace, cx| {
-            update(workspace);
+        update: impl FnOnce(&mut WorkspaceState) -> T,
+    ) -> T {
+        let output = self.workspace.update(cx, |workspace, cx| {
+            let output = update(workspace);
             cx.notify();
+            output
         });
 
         if let Err(error) = storage::save_workspace(self.workspace.read(cx)) {
@@ -156,6 +180,7 @@ impl SlermApp {
         }
 
         cx.notify();
+        output
     }
 }
 
@@ -176,13 +201,13 @@ impl Render for SlermApp {
         div()
             .key_context("workspace")
             .track_focus(&self.focus_handle)
-            .on_action(cx.listener(Self::active_item_close))
-            .on_action(cx.listener(Self::active_item_cycle_next))
-            .on_action(cx.listener(Self::active_item_cycle_prev))
-            .on_action(cx.listener(Self::active_item_select_by_index))
+            .on_action(cx.listener(Self::active_terminal_close))
+            .on_action(cx.listener(Self::active_terminal_cycle_next))
+            .on_action(cx.listener(Self::active_terminal_cycle_prev))
+            .on_action(cx.listener(Self::active_terminal_select_by_index))
             .on_action(cx.listener(Self::active_project_cycle_next))
             .on_action(cx.listener(Self::active_project_cycle_prev))
-            .on_action(cx.listener(Self::open_add_item_picker))
+            .on_action(cx.listener(Self::open_add_terminal_picker))
             .size_full()
             .flex()
             .flex_col()
@@ -193,10 +218,13 @@ impl Render for SlermApp {
                     .flex()
                     .flex_1()
                     .overflow_hidden()
-                    .child(Sidebar::new(self.workspace.clone()))
+                    .child(Sidebar::new(self.workspace.clone(), self.runtime.clone()))
                     .child(TerminalPane::new(self.workspace.clone())),
             )
-            .child(ProjectBar::new(self.workspace.clone()))
+            .child(ProjectBar::new(
+                self.workspace.clone(),
+                self.runtime.clone(),
+            ))
             .child(ModalLayer::new(self.active_modal.clone(), {
                 let app = cx.entity();
                 move |window, cx| {

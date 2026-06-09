@@ -2,6 +2,10 @@ use gpui::{App, Entity, FontWeight, IntoElement, RenderOnce, Window, div, prelud
 
 use crate::{theme, workspace::model::WorkspaceState};
 
+/// Main terminal viewport for the active project's active terminal.
+///
+/// This is currently a preview shell; libghostty-backed rendering should replace
+/// the placeholder while continuing to read selection from workspace state.
 #[derive(IntoElement)]
 pub struct TerminalPane {
     workspace: Entity<WorkspaceState>,
@@ -17,21 +21,21 @@ impl RenderOnce for TerminalPane {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = theme::active();
         let workspace = self.workspace.read(cx);
-        let active_item = workspace
+        let active_terminal = workspace
             .active_project()
-            .and_then(|project| project.active_item());
+            .and_then(|project| project.active_terminal());
 
-        let title = active_item
-            .map(|item| item.title.clone())
+        let title = active_terminal
+            .map(|terminal| terminal.title.clone())
             .unwrap_or_else(|| "No terminal selected".to_string());
-        let cwd = active_item
-            .map(|item| item.cwd.display().to_string())
+        let cwd = active_terminal
+            .map(|terminal| terminal.cwd.display().to_string())
             .unwrap_or_default();
-        let command = active_item
-            .and_then(|item| item.command.clone())
+        let command = active_terminal
+            .map(|terminal| terminal.command.display_command_line())
             .unwrap_or_else(|| "$SHELL".to_string());
-        let project_id = active_item
-            .map(|item| format!("project #{}", item.project_id.0))
+        let project_id = active_terminal
+            .map(|terminal| format!("project #{}", terminal.project_id.0))
             .unwrap_or_default();
 
         div()

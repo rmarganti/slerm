@@ -1,19 +1,27 @@
 use gpui::{App, Entity, FontWeight, IntoElement, RenderOnce, Window, div, prelude::*, px};
 
-use crate::{project::model::Project, theme, workspace::model::WorkspaceState};
+use crate::{
+    project::model::Project,
+    runtime::{AttentionSeverity, TerminalRuntimeService},
+    theme,
+    ui::attention::{attention_color, terminal_attention_icon},
+    workspace::model::WorkspaceState,
+};
 
 // ----------------------------------------------------------------
 // Sidebar
 // ----------------------------------------------------------------
 
+/// Left navigation for the active project's terminals grouped by extension.
 #[derive(IntoElement)]
 pub struct Sidebar {
     workspace: Entity<WorkspaceState>,
+    runtime: Entity<TerminalRuntimeService>,
 }
 
 impl Sidebar {
-    pub fn new(workspace: Entity<WorkspaceState>) -> Self {
-        Self { workspace }
+    pub fn new(workspace: Entity<WorkspaceState>, runtime: Entity<TerminalRuntimeService>) -> Self {
+        Self { workspace, runtime }
     }
 }
 
@@ -21,6 +29,7 @@ impl RenderOnce for Sidebar {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let theme = theme::active();
         let workspace = self.workspace.read(cx);
+        let runtime = self.runtime.read(cx);
 
         let Some(project) = workspace.active_project() else {
             return div()
@@ -60,9 +69,9 @@ impl RenderOnce for Sidebar {
                             .child(project.path.display().to_string()),
                     ),
             )
-            .child(Section::new(project, "Terminals"))
-            .child(Section::new(project, "Agents"))
-            .child(Section::new(project, "Tasks"))
+            .child(Section::new(project, runtime, "Terminals"))
+            .child(Section::new(project, runtime, "Agents"))
+            .child(Section::new(project, runtime, "Tasks"))
     }
 }
 
@@ -70,29 +79,34 @@ impl RenderOnce for Sidebar {
 // Section
 // ----------------------------------------------------------------
 
+/// One sidebar group, such as plain terminals, agents, or tasks.
 #[derive(IntoElement)]
 struct Section {
     label: &'static str,
-    items: Vec<ItemRow>,
+    terminals: Vec<TerminalRow>,
 }
 
 impl Section {
-    fn new(project: &Project, label: &'static str) -> Self {
-        let items = project
-            .items_in_sidebar_order()
+    fn new(project: &Project, runtime: &TerminalRuntimeService, label: &'static str) -> Self {
+        let terminals = project
+            .terminals_in_sidebar_order()
             .into_iter()
             .enumerate()
-            .filter(|(_, item)| item.kind.section_label() == label)
-            .map(|(index, item)| {
-                ItemRow::new(
-                    item.title.clone(),
-                    project.active_item == Some(item.id),
+            .filter(|(_, terminal)| terminal.extension.section_label() == label)
+            .map(|(index, terminal)| {
+                TerminalRow::new(
+                    terminal.title.clone(),
+                    project.active_terminal == Some(terminal.id),
                     (index < 9).then_some(index + 1),
+                    runtime
+                        .terminal_status(terminal.id)
+                        .map(|status| status.attention.severity)
+                        .unwrap_or(AttentionSeverity::None),
                 )
             })
             .collect();
 
-        Self { label, items }
+        Self { label, terminals }
     }
 
     fn icon(&self) -> &'static str {
@@ -124,7 +138,7 @@ impl RenderOnce for Section {
                     .child(div().w(px(14.0)).child(self.icon()))
                     .child(tracked_uppercase(self.label)),
             )
-            .children(self.items)
+            .children(self.terminals)
     }
 }
 
@@ -138,27 +152,35 @@ fn tracked_uppercase(label: &str) -> String {
 }
 
 // ----------------------------------------------------------------
-// ItemRow
+// TerminalRow
 // ----------------------------------------------------------------
 
+/// Sidebar row for selecting a terminal and showing its attention state.
 #[derive(IntoElement)]
-struct ItemRow {
+struct TerminalRow {
     title: String,
     is_active: bool,
     keybinding_index: Option<usize>,
+    attention: AttentionSeverity,
 }
 
-impl ItemRow {
-    fn new(title: String, is_active: bool, keybinding_index: Option<usize>) -> Self {
+impl TerminalRow {
+    fn new(
+        title: String,
+        is_active: bool,
+        keybinding_index: Option<usize>,
+        attention: AttentionSeverity,
+    ) -> Self {
         Self {
             title,
             is_active,
             keybinding_index,
+            attention,
         }
     }
 }
 
-impl RenderOnce for ItemRow {
+impl RenderOnce for TerminalRow {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let theme = theme::active();
 
@@ -181,7 +203,11 @@ impl RenderOnce for ItemRow {
             .items_center()
             .justify_between()
             .gap_2()
-            .child(div().text_color(theme.minus1).child("◦"))
+            .child(
+                div()
+                    .text_color(attention_color(self.attention))
+                    .child(terminal_attention_icon(self.attention)),
+            )
             .child(div().flex_1().truncate().child(self.title))
             .when_some(self.keybinding_index, |row, index| {
                 row.child(

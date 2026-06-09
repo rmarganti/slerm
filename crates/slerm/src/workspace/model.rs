@@ -3,11 +3,16 @@ use serde::{Deserialize, Serialize};
 use crate::{
     project::model::{CycleDirection, Project, ProjectId},
     terminal::{
-        instance::TerminalInstance,
-        kind::{AgentKind, TaskStatus, TerminalKind},
+        extension::{AgentKind, AgentSpec, TaskSpec, TerminalExtensionSpec},
+        spec::{ProcessSpec, TerminalSpec},
     },
 };
 
+/// Persisted workspace model for projects and active project selection.
+///
+/// This state describes what Slerm should know across launches. Live terminal
+/// sessions, process handles, task status, and agent status belong in runtime
+/// services instead.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct WorkspaceState {
     pub projects: Vec<Project>,
@@ -20,101 +25,95 @@ impl WorkspaceState {
         let zed_id = ProjectId(2);
         let notes_id = ProjectId(3);
 
-        let slerm =
-            Project::new(1, "slerm", "/Users/rmarganti/code/rmarganti/slerm").with_items(vec![
-                TerminalInstance::new(
+        let slerm = Project::new(1, "slerm", "/Users/rmarganti/code/rmarganti/slerm")
+            .with_terminals(vec![
+                TerminalSpec::new(
                     1,
                     slerm_id,
-                    TerminalKind::Terminal,
+                    TerminalExtensionSpec::Plain,
                     "shell",
                     "/Users/rmarganti/code/rmarganti/slerm",
-                    None::<String>,
+                    ProcessSpec::shell(),
                 ),
-                TerminalInstance::new(
+                TerminalSpec::new(
                     2,
                     slerm_id,
-                    TerminalKind::Agent(AgentKind::Pi),
+                    TerminalExtensionSpec::Agent(AgentSpec::new(AgentKind::Pi)),
                     "pi coding agent",
                     "/Users/rmarganti/code/rmarganti/slerm",
-                    Some("pi"),
+                    ProcessSpec::new("pi", [] as [&str; 0]),
                 ),
-                TerminalInstance::new(
+                TerminalSpec::new(
                     3,
                     slerm_id,
-                    TerminalKind::Task {
-                        status: TaskStatus::Running,
-                    },
+                    TerminalExtensionSpec::Task(TaskSpec::default()),
                     "cargo run",
                     "/Users/rmarganti/code/rmarganti/slerm",
-                    Some("cargo run -p slerm"),
+                    ProcessSpec::new("cargo", ["run", "-p", "slerm"]),
                 ),
-                TerminalInstance::new(
+                TerminalSpec::new(
                     4,
                     slerm_id,
-                    TerminalKind::Task {
-                        status: TaskStatus::Idle,
-                    },
+                    TerminalExtensionSpec::Task(TaskSpec::default()),
                     "cargo test",
                     "/Users/rmarganti/code/rmarganti/slerm",
-                    Some("cargo test"),
+                    ProcessSpec::new("cargo", ["test"]),
                 ),
             ]);
 
-        let zed = Project::new(2, "zed", "/Users/rmarganti/code/github/zed").with_items(vec![
-            TerminalInstance::new(
+        let zed = Project::new(2, "zed", "/Users/rmarganti/code/github/zed").with_terminals(vec![
+            TerminalSpec::new(
                 5,
                 zed_id,
-                TerminalKind::Agent(AgentKind::Codex),
+                TerminalExtensionSpec::Agent(AgentSpec::new(AgentKind::Codex)),
                 "codex",
                 "/Users/rmarganti/code/github/zed",
-                Some("codex"),
+                ProcessSpec::new("codex", [] as [&str; 0]),
             ),
         ]);
 
-        let notes = Project::new(3, "notes", "/Users/rmarganti/notes").with_items(vec![
-            TerminalInstance::new(
+        let notes = Project::new(3, "notes", "/Users/rmarganti/notes").with_terminals(vec![
+            TerminalSpec::new(
                 6,
                 notes_id,
-                TerminalKind::Terminal,
+                TerminalExtensionSpec::Plain,
                 "shell",
                 "/Users/rmarganti/notes",
-                None::<String>,
+                ProcessSpec::shell(),
             ),
-            TerminalInstance::new(
+            TerminalSpec::new(
                 7,
                 notes_id,
-                TerminalKind::Task {
-                    status: TaskStatus::Succeeded,
-                },
+                TerminalExtensionSpec::Task(TaskSpec::default()),
                 "sync vault",
                 "/Users/rmarganti/notes",
-                Some("git pull --rebase && git push"),
+                ProcessSpec::shell_command("git pull --rebase && git push"),
             ),
-            TerminalInstance::new(
+            TerminalSpec::new(
                 8,
                 notes_id,
-                TerminalKind::Task {
-                    status: TaskStatus::Failed,
-                },
+                TerminalExtensionSpec::Task(TaskSpec::default()),
                 "publish",
                 "/Users/rmarganti/notes",
-                Some("make publish"),
+                ProcessSpec::new("make", ["publish"]),
             ),
-            TerminalInstance::new(
+            TerminalSpec::new(
                 9,
                 notes_id,
-                TerminalKind::Agent(AgentKind::OpenCode),
+                TerminalExtensionSpec::Agent(AgentSpec::new(AgentKind::OpenCode)),
                 "opencode",
                 "/Users/rmarganti/notes",
-                Some("opencode"),
+                ProcessSpec::new("opencode", [] as [&str; 0]),
             ),
-            TerminalInstance::new(
+            TerminalSpec::new(
                 10,
                 notes_id,
-                TerminalKind::Agent(AgentKind::Custom("Claude".to_string())),
+                TerminalExtensionSpec::Agent(AgentSpec::new(AgentKind::Custom(
+                    "Claude".to_string(),
+                ))),
                 "claude",
                 "/Users/rmarganti/notes",
-                Some("claude"),
+                ProcessSpec::new("claude", [] as [&str; 0]),
             ),
         ]);
 
@@ -131,34 +130,32 @@ impl WorkspaceState {
             .find(|project| project.id == active_project)
     }
 
-    pub fn add_terminal_to_active_project(
-        &mut self,
-    ) -> Option<crate::terminal::instance::TerminalInstanceId> {
+    pub fn add_terminal_to_active_project(&mut self) -> Option<TerminalSpec> {
         let active_project = self.active_project?;
-        let next_id = self.next_terminal_instance_id();
+        let next_id = self.next_terminal_id();
         let project = self
             .projects
             .iter_mut()
             .find(|project| project.id == active_project)?;
 
-        let terminal = TerminalInstance::new(
+        let terminal = TerminalSpec::new(
             next_id.0,
             project.id,
-            TerminalKind::Terminal,
+            TerminalExtensionSpec::Plain,
             "shell",
             project.path.clone(),
-            None::<String>,
+            ProcessSpec::shell(),
         );
-        project.add_item(terminal);
-        Some(next_id)
+        project.add_terminal(terminal.clone());
+        Some(terminal)
     }
 
-    fn next_terminal_instance_id(&self) -> crate::terminal::instance::TerminalInstanceId {
-        crate::terminal::instance::TerminalInstanceId(
+    fn next_terminal_id(&self) -> crate::terminal::spec::TerminalId {
+        crate::terminal::spec::TerminalId(
             self.projects
                 .iter()
-                .flat_map(|project| project.items.iter())
-                .map(|item| item.id.0)
+                .flat_map(|project| project.terminals.iter())
+                .map(|terminal| terminal.id.0)
                 .max()
                 .unwrap_or(0)
                 + 1,
@@ -192,7 +189,7 @@ impl WorkspaceState {
         self.active_project = Some(self.projects[next_index].id);
     }
 
-    pub fn cycle_active_item(&mut self, direction: CycleDirection) {
+    pub fn cycle_active_terminal(&mut self, direction: CycleDirection) {
         let Some(active_project) = self.active_project else {
             return;
         };
@@ -202,11 +199,11 @@ impl WorkspaceState {
             .iter_mut()
             .find(|project| project.id == active_project)
         {
-            project.cycle_active_item(direction);
+            project.cycle_active_terminal(direction);
         }
     }
 
-    pub fn select_active_item_by_sidebar_index(&mut self, index: usize) {
+    pub fn select_active_terminal_by_sidebar_index(&mut self, index: usize) {
         let Some(active_project) = self.active_project else {
             return;
         };
@@ -216,21 +213,16 @@ impl WorkspaceState {
             .iter_mut()
             .find(|project| project.id == active_project)
         {
-            project.select_active_item_by_sidebar_index(index);
+            project.select_active_terminal_by_sidebar_index(index);
         }
     }
 
-    pub fn close_active_item(&mut self) {
-        let Some(active_project) = self.active_project else {
-            return;
-        };
+    pub fn close_active_terminal(&mut self) -> Option<crate::terminal::spec::TerminalId> {
+        let active_project = self.active_project?;
 
-        if let Some(project) = self
-            .projects
+        self.projects
             .iter_mut()
-            .find(|project| project.id == active_project)
-        {
-            project.close_active_item();
-        }
+            .find(|project| project.id == active_project)?
+            .close_active_terminal()
     }
 }

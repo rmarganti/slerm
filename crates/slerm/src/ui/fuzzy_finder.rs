@@ -41,14 +41,17 @@ struct FuzzyMatch {
     score: i64,
 }
 
+type ConfirmHandler<T> = dyn Fn(T, &mut Window, &mut Context<FuzzyFinder<T>>) + 'static;
+type CancelHandler<T> = dyn Fn(&mut Window, &mut Context<FuzzyFinder<T>>) + 'static;
+
 pub struct FuzzyFinder<T: Clone + 'static> {
     items: Vec<FuzzyFinderItem<T>>,
     filtered: Vec<FuzzyMatch>,
     selected_index: usize,
     input: Entity<TextInput>,
     focus_handle: FocusHandle,
-    on_confirm: Box<dyn Fn(T, &mut Window, &mut Context<Self>) + 'static>,
-    on_cancel: Box<dyn Fn(&mut Window, &mut Context<Self>) + 'static>,
+    on_confirm: Box<ConfirmHandler<T>>,
+    on_cancel: Box<CancelHandler<T>>,
 }
 
 impl<T: Clone + 'static> FuzzyFinder<T> {

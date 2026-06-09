@@ -9,6 +9,8 @@ use gpui::{
 
 use crate::theme;
 
+type ChangeHandler = dyn Fn(&str, &mut Window, &mut Context<TextInput>) + 'static;
+
 actions!(
     slerm_text_input,
     [
@@ -30,7 +32,7 @@ pub struct TextInput {
     marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
-    on_change: Option<Box<dyn Fn(&str, &mut Window, &mut Context<Self>) + 'static>>,
+    on_change: Option<Box<ChangeHandler>>,
 }
 
 impl TextInput {
@@ -387,10 +389,10 @@ impl Element for TextElement {
         let line = prepaint.line.take().unwrap();
         line.paint(bounds.origin, window.line_height(), window, cx)
             .unwrap();
-        if focus_handle.is_focused(window) {
-            if let Some(cursor) = prepaint.cursor.take() {
-                window.paint_quad(cursor);
-            }
+        if focus_handle.is_focused(window)
+            && let Some(cursor) = prepaint.cursor.take()
+        {
+            window.paint_quad(cursor);
         }
         self.input.update(cx, |input, _| {
             input.last_layout = Some(line);
