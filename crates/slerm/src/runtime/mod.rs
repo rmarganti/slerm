@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, time::SystemTime};
+use std::{collections::BTreeMap, path::PathBuf, time::SystemTime};
 
 use crate::{
     project::model::Project,
@@ -333,6 +333,117 @@ fn add_attention(
     reasons.push(reason);
 }
 
+/// Minimal PTY/process backend seam.
+///
+/// Real PTY and libghostty integration should attach behind this trait later.
+/// This trait intentionally models process/session control only; terminal
+/// rendering, scrollback, grid state, damage tracking, and agent-output parsing
+/// should be introduced with the libghostty integration instead of here.
+pub trait PtyBackend {
+    fn spawn(&mut self, request: SpawnProcessRequest) -> anyhow::Result<TerminalSession>;
+
+    fn kill(&mut self, session_id: SessionId) -> anyhow::Result<()>;
+
+    fn resize(&mut self, session_id: SessionId, size: TerminalSize) -> anyhow::Result<()>;
+
+    fn write(&mut self, session_id: SessionId, bytes: &[u8]) -> anyhow::Result<()>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SpawnProcessRequest {
+    pub terminal_id: TerminalId,
+    pub process: crate::terminal::instance::ProcessSpec,
+    pub cwd: PathBuf,
+    pub env: BTreeMap<String, String>,
+    pub initial_size: TerminalSize,
+}
+
+impl SpawnProcessRequest {
+    pub fn from_spec(spec: &TerminalSpec, initial_size: TerminalSize) -> Self {
+        Self {
+            terminal_id: spec.id,
+            process: spec.command.clone(),
+            cwd: spec.cwd.clone(),
+            env: spec.command.env.clone(),
+            initial_size,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerminalSize {
+    pub columns: u16,
+    pub rows: u16,
+}
+
+impl TerminalSize {
+    pub const DEFAULT: Self = Self {
+        columns: 80,
+        rows: 24,
+    };
+
+    pub fn new(columns: u16, rows: u16) -> Self {
+        Self { columns, rows }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MockPtyBackend {
+    next_session_id: u64,
+    pub spawned: Vec<SpawnProcessRequest>,
+    pub killed: Vec<SessionId>,
+    pub resized: Vec<(SessionId, TerminalSize)>,
+    pub written: Vec<(SessionId, Vec<u8>)>,
+}
+
+impl Default for MockPtyBackend {
+    fn default() -> Self {
+        Self {
+            next_session_id: 1,
+            spawned: Vec::new(),
+            killed: Vec::new(),
+            resized: Vec::new(),
+            written: Vec::new(),
+        }
+    }
+}
+
+impl MockPtyBackend {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl PtyBackend for MockPtyBackend {
+    fn spawn(&mut self, request: SpawnProcessRequest) -> anyhow::Result<TerminalSession> {
+        let id = SessionId(self.next_session_id);
+        self.next_session_id += 1;
+        let terminal_id = request.terminal_id;
+        self.spawned.push(request);
+
+        Ok(TerminalSession {
+            id,
+            terminal_id,
+            started_at: SystemTime::now(),
+        })
+    }
+
+    fn kill(&mut self, session_id: SessionId) -> anyhow::Result<()> {
+        self.killed.push(session_id);
+        Ok(())
+    }
+
+    fn resize(&mut self, session_id: SessionId, size: TerminalSize) -> anyhow::Result<()> {
+        self.resized.push((session_id, size));
+        Ok(())
+    }
+
+    fn write(&mut self, session_id: SessionId, bytes: &[u8]) -> anyhow::Result<()> {
+        self.written.push((session_id, bytes.to_vec()));
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct TerminalRuntimeService {
     states: BTreeMap<TerminalId, TerminalRuntimeState>,
@@ -364,6 +475,64 @@ impl TerminalRuntimeService {
         self.states
             .entry(spec.id)
             .or_insert_with(|| TerminalRuntimeState::from_spec(spec))
+    }
+
+    pub fn spawn_terminal(
+        &mut self,
+        spec: &TerminalSpec,
+        size: TerminalSize,
+        backend: &mut impl PtyBackend,
+    ) -> anyhow::Result<TerminalSession> {
+        let terminal_id = spec.id;
+        {
+            let state = self.ensure_terminal(spec);
+            state.session.status = TerminalRunStatus::Starting;
+            state.session.updated_at = SystemTime::now();
+        }
+
+        match backend.spawn(SpawnProcessRequest::from_spec(spec, size)) {
+            Ok(session) => {
+                if let Some(state) = self.terminal_mut(terminal_id) {
+                    state.session.session = Some(session.clone());
+                    state.session.status = TerminalRunStatus::Running;
+                    state.session.exit_status = None;
+                    state.session.updated_at = SystemTime::now();
+                }
+                Ok(session)
+            }
+            Err(error) => {
+                if let Some(state) = self.terminal_mut(terminal_id) {
+                    state.session.session = None;
+                    state.session.status = TerminalRunStatus::FailedToStart;
+                    state.session.updated_at = SystemTime::now();
+                }
+                Err(error)
+            }
+        }
+    }
+
+    pub fn kill_terminal(
+        &mut self,
+        terminal_id: TerminalId,
+        backend: &mut impl PtyBackend,
+    ) -> anyhow::Result<()> {
+        let Some(session_id) = self
+            .terminal(terminal_id)
+            .and_then(|state| state.session.session.as_ref())
+            .map(|session| session.id)
+        else {
+            return Ok(());
+        };
+
+        backend.kill(session_id)?;
+
+        if let Some(state) = self.terminal_mut(terminal_id) {
+            state.session.session = None;
+            state.session.status = TerminalRunStatus::Exited;
+            state.session.updated_at = SystemTime::now();
+        }
+
+        Ok(())
     }
 
     pub fn remove_terminal(&mut self, terminal_id: TerminalId) -> Option<TerminalRuntimeState> {
@@ -527,6 +696,61 @@ mod tests {
             status.attention.reasons,
             vec![AttentionReason::TerminalExited]
         );
+    }
+
+    #[test]
+    fn backend_spawn_request_uses_process_spec_and_terminal_metadata() {
+        let spec = TerminalSpec::new(
+            7,
+            ProjectId(3),
+            TerminalExtensionSpec::Plain,
+            "server",
+            "/workspace/slerm",
+            ProcessSpec::new("cargo", ["run", "-p", "slerm"]),
+        );
+
+        let request = SpawnProcessRequest::from_spec(&spec, TerminalSize::new(120, 40));
+
+        assert_eq!(request.terminal_id, TerminalId(7));
+        assert_eq!(request.cwd, PathBuf::from("/workspace/slerm"));
+        assert_eq!(request.process.display_command_line(), "cargo run -p slerm");
+        assert_eq!(request.initial_size, TerminalSize::new(120, 40));
+    }
+
+    #[test]
+    fn runtime_service_spawns_and_kills_through_backend_seam() {
+        let spec = TerminalSpec::new(
+            9,
+            ProjectId(1),
+            TerminalExtensionSpec::Plain,
+            "terminal",
+            "/tmp",
+            ProcessSpec::shell(),
+        );
+        let mut service = TerminalRuntimeService::new();
+        let mut backend = MockPtyBackend::new();
+
+        let session = service
+            .spawn_terminal(&spec, TerminalSize::DEFAULT, &mut backend)
+            .expect("mock spawn succeeds");
+
+        assert_eq!(session.id, SessionId(1));
+        assert_eq!(backend.spawned.len(), 1);
+        let state = service.terminal(spec.id).expect("runtime state exists");
+        assert_eq!(state.session.status, TerminalRunStatus::Running);
+        assert_eq!(
+            state.session.session.as_ref().map(|session| session.id),
+            Some(SessionId(1))
+        );
+
+        service
+            .kill_terminal(spec.id, &mut backend)
+            .expect("mock kill succeeds");
+
+        assert_eq!(backend.killed, vec![SessionId(1)]);
+        let state = service.terminal(spec.id).expect("runtime state remains");
+        assert_eq!(state.session.status, TerminalRunStatus::Exited);
+        assert!(state.session.session.is_none());
     }
 
     #[test]
