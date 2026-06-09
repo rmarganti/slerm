@@ -7,10 +7,12 @@ pub enum ActiveModal {
     AddTerminalPicker(Entity<AddTerminalPicker>),
 }
 
+type DismissHandler = dyn Fn(&mut Window, &mut App) + 'static;
+
 #[derive(IntoElement)]
 pub struct ModalLayer {
     active_modal: Option<ActiveModal>,
-    on_dismiss: Box<dyn Fn(&mut Window, &mut App) + 'static>,
+    on_dismiss: Box<DismissHandler>,
 }
 
 impl ModalLayer {

@@ -23,17 +23,9 @@ pub enum AgentKind {
     Custom(String),
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct AgentDetectionSpec {
     pub prompt_patterns: Vec<String>,
-}
-
-impl Default for AgentDetectionSpec {
-    fn default() -> Self {
-        Self {
-            prompt_patterns: Vec::new(),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
