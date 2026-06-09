@@ -264,7 +264,7 @@ impl TerminalStatus {
                     &mut severity,
                     &mut reasons,
                     AttentionSeverity::Error,
-                    AttentionReason::TerminalExited,
+                    AttentionReason::TerminalFailedToStart,
                 );
             }
         }
@@ -323,6 +323,7 @@ pub enum AttentionReason {
     TaskSucceeded,
     TaskFailed,
     TerminalExited,
+    TerminalFailedToStart,
 }
 
 /// Attention summary for a project, derived from its terminals.
@@ -380,7 +381,6 @@ pub struct SpawnProcessRequest {
     pub terminal_id: TerminalId,
     pub process: crate::terminal::instance::ProcessSpec,
     pub cwd: PathBuf,
-    pub env: BTreeMap<String, String>,
     pub initial_size: TerminalSize,
 }
 
@@ -390,7 +390,6 @@ impl SpawnProcessRequest {
             terminal_id: spec.id,
             process: spec.command.clone(),
             cwd: spec.cwd.clone(),
-            env: spec.command.env.clone(),
             initial_size,
         }
     }
@@ -731,14 +730,31 @@ mod tests {
     }
 
     #[test]
+    fn terminal_failed_to_start_derives_failed_outcome_and_reason() {
+        let mut runtime = terminal(TerminalExtensionSpec::Plain);
+        runtime.session.status = TerminalRunStatus::FailedToStart;
+
+        let status = TerminalStatus::derive(&runtime);
+
+        assert_eq!(status.outcome, TerminalOutcomeStatus::Failed);
+        assert_eq!(status.attention.severity, AttentionSeverity::Error);
+        assert_eq!(
+            status.attention.reasons,
+            vec![AttentionReason::TerminalFailedToStart]
+        );
+    }
+
+    #[test]
     fn backend_spawn_request_uses_process_spec_and_terminal_metadata() {
+        let mut process = ProcessSpec::new("cargo", ["run", "-p", "slerm"]);
+        process.env.insert("RUST_LOG".into(), "debug".into());
         let spec = TerminalSpec::new(
             7,
             ProjectId(3),
             TerminalExtensionSpec::Plain,
             "server",
             "/workspace/slerm",
-            ProcessSpec::new("cargo", ["run", "-p", "slerm"]),
+            process,
         );
 
         let request = SpawnProcessRequest::from_spec(&spec, TerminalSize::new(120, 40));
@@ -746,6 +762,10 @@ mod tests {
         assert_eq!(request.terminal_id, TerminalId(7));
         assert_eq!(request.cwd, PathBuf::from("/workspace/slerm"));
         assert_eq!(request.process.display_command_line(), "cargo run -p slerm");
+        assert_eq!(
+            request.process.env.get("RUST_LOG").map(String::as_str),
+            Some("debug")
+        );
         assert_eq!(request.initial_size, TerminalSize::new(120, 40));
     }
 

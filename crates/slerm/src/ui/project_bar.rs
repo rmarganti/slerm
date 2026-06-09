@@ -3,6 +3,7 @@ use gpui::{App, Entity, IntoElement, RenderOnce, Window, div, prelude::*};
 use crate::{
     runtime::{AttentionSeverity, TerminalRuntimeService},
     theme,
+    ui::attention::{attention_color, project_attention_icon},
     workspace::model::WorkspaceState,
 };
 
@@ -42,7 +43,7 @@ impl RenderOnce for ProjectBar {
                         project.child(
                             div()
                                 .text_color(attention_color(attention))
-                                .child(attention_icon(attention)),
+                                .child(project_attention_icon(attention)),
                         )
                     })
             });
@@ -59,26 +60,5 @@ impl RenderOnce for ProjectBar {
             .text_color(theme.minus1)
             .child(div().flex().items_center().gap_4().children(projects))
             .child(div().child("cmd-←/→ project · cmd-↑/↓ terminal · cmd-w close · cmd-q quit"))
-    }
-}
-
-fn attention_icon(severity: AttentionSeverity) -> &'static str {
-    match severity {
-        AttentionSeverity::None => "",
-        AttentionSeverity::Info => "•",
-        AttentionSeverity::Activity => "●",
-        AttentionSeverity::NeedsUser => "◆",
-        AttentionSeverity::Error => "!",
-    }
-}
-
-fn attention_color(severity: AttentionSeverity) -> gpui::Rgba {
-    let theme = theme::active();
-    match severity {
-        AttentionSeverity::None => theme.minus1,
-        AttentionSeverity::Info => theme.info,
-        AttentionSeverity::Activity => theme.plus2,
-        AttentionSeverity::NeedsUser => theme.warning,
-        AttentionSeverity::Error => theme.error,
     }
 }

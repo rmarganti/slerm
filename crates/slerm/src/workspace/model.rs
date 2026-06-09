@@ -130,9 +130,7 @@ impl WorkspaceState {
             .find(|project| project.id == active_project)
     }
 
-    pub fn add_terminal_to_active_project(
-        &mut self,
-    ) -> Option<crate::terminal::instance::TerminalId> {
+    pub fn add_terminal_to_active_project(&mut self) -> Option<TerminalSpec> {
         let active_project = self.active_project?;
         let next_id = self.next_terminal_id();
         let project = self
@@ -148,8 +146,8 @@ impl WorkspaceState {
             project.path.clone(),
             ProcessSpec::shell(),
         );
-        project.add_terminal(terminal);
-        Some(next_id)
+        project.add_terminal(terminal.clone());
+        Some(terminal)
     }
 
     fn next_terminal_id(&self) -> crate::terminal::instance::TerminalId {

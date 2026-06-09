@@ -4,6 +4,7 @@ use crate::{
     project::model::Project,
     runtime::{AttentionSeverity, TerminalRuntimeService},
     theme,
+    ui::attention::{attention_color, terminal_attention_icon},
     workspace::model::WorkspaceState,
 };
 
@@ -205,7 +206,7 @@ impl RenderOnce for TerminalRow {
             .child(
                 div()
                     .text_color(attention_color(self.attention))
-                    .child(attention_icon(self.attention)),
+                    .child(terminal_attention_icon(self.attention)),
             )
             .child(div().flex_1().truncate().child(self.title))
             .when_some(self.keybinding_index, |row, index| {
@@ -216,26 +217,5 @@ impl RenderOnce for TerminalRow {
                         .child(format!("⌘{index}")),
                 )
             })
-    }
-}
-
-fn attention_icon(severity: AttentionSeverity) -> &'static str {
-    match severity {
-        AttentionSeverity::None => "◦",
-        AttentionSeverity::Info => "•",
-        AttentionSeverity::Activity => "●",
-        AttentionSeverity::NeedsUser => "◆",
-        AttentionSeverity::Error => "!",
-    }
-}
-
-fn attention_color(severity: AttentionSeverity) -> gpui::Rgba {
-    let theme = theme::active();
-    match severity {
-        AttentionSeverity::None => theme.minus1,
-        AttentionSeverity::Info => theme.info,
-        AttentionSeverity::Activity => theme.plus2,
-        AttentionSeverity::NeedsUser => theme.warning,
-        AttentionSeverity::Error => theme.error,
     }
 }

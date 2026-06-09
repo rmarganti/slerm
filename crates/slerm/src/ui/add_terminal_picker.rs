@@ -40,16 +40,7 @@ impl AddTerminalPicker {
                 move |kind, window, cx| match kind {
                     AddTerminalChoice::Terminal => {
                         let added_terminal = workspace.update(cx, |workspace, cx| {
-                            let added_terminal = workspace
-                                .add_terminal_to_active_project()
-                                .and_then(|terminal_id| {
-                                    workspace
-                                        .projects
-                                        .iter()
-                                        .flat_map(|project| project.terminals.iter())
-                                        .find(|terminal| terminal.id == terminal_id)
-                                        .cloned()
-                                });
+                            let added_terminal = workspace.add_terminal_to_active_project();
                             cx.notify();
                             added_terminal
                         });
