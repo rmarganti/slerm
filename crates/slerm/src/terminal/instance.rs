@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{project::model::ProjectId, terminal::extension::TerminalExtensionSpec};
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 pub struct TerminalId(pub u64);
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
