@@ -5,10 +5,11 @@ use gpui::{
 
 use crate::{
     actions::{
-        ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveProjectRemove,
-        ActiveProjectSelectByIndex, ActiveTerminalClose, ActiveTerminalCycleNext,
-        ActiveTerminalCyclePrev, ActiveTerminalSelectByIndex, OpenAddProjectPicker,
-        OpenAddTerminalPicker, OpenProjectPicker,
+        ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveProjectMoveLeft,
+        ActiveProjectMoveRight, ActiveProjectRemove, ActiveProjectSelectByIndex,
+        ActiveTerminalClose, ActiveTerminalCycleNext, ActiveTerminalCyclePrev,
+        ActiveTerminalSelectByIndex, OpenAddProjectPicker, OpenAddTerminalPicker,
+        OpenProjectPicker,
     },
     project::model::CycleDirection,
     runtime::TerminalRuntimeService,
@@ -83,6 +84,24 @@ impl SlermApp {
         cx: &mut Context<Self>,
     ) {
         self.cycle_active_project(CycleDirection::Next, cx);
+    }
+
+    fn active_project_move_left(
+        &mut self,
+        _: &ActiveProjectMoveLeft,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_active_project(CycleDirection::Prev, cx);
+    }
+
+    fn active_project_move_right(
+        &mut self,
+        _: &ActiveProjectMoveRight,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_active_project(CycleDirection::Next, cx);
     }
 
     fn active_project_remove(
@@ -270,6 +289,12 @@ impl SlermApp {
         });
     }
 
+    fn move_active_project(&mut self, direction: CycleDirection, cx: &mut Context<Self>) {
+        self.update_workspace(cx, |workspace| {
+            workspace.move_active_project(direction);
+        });
+    }
+
     fn select_active_terminal_by_sidebar_index(&mut self, index: usize, cx: &mut Context<Self>) {
         self.update_workspace(cx, |workspace| {
             workspace.select_active_terminal_by_sidebar_index(index);
@@ -325,6 +350,8 @@ impl Render for SlermApp {
             .on_action(cx.listener(Self::active_terminal_select_by_index))
             .on_action(cx.listener(Self::active_project_cycle_next))
             .on_action(cx.listener(Self::active_project_cycle_prev))
+            .on_action(cx.listener(Self::active_project_move_left))
+            .on_action(cx.listener(Self::active_project_move_right))
             .on_action(cx.listener(Self::active_project_remove))
             .on_action(cx.listener(Self::active_project_select_by_index))
             .on_action(cx.listener(Self::open_add_terminal_picker))
