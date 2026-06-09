@@ -43,6 +43,6 @@ impl RenderOnce for ProjectBar {
             .text_xs()
             .text_color(theme.minus1)
             .child(div().flex().items_center().gap_4().children(projects))
-            .child(div().child("cmd-←/→ project · cmd-↑/↓ item · cmd-w close · cmd-q quit"))
+            .child(div().child("cmd-←/→ project · cmd-↑/↓ terminal · cmd-w close · cmd-q quit"))
     }
 }

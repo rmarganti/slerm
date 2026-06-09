@@ -3,17 +3,17 @@ use gpui::{Action, actions};
 actions!(
     slerm,
     [
-        ActiveItemCycleNext,
-        ActiveItemCyclePrev,
-        ActiveItemClose,
+        ActiveTerminalCycleNext,
+        ActiveTerminalCyclePrev,
+        ActiveTerminalClose,
         ActiveProjectCycleNext,
         ActiveProjectCyclePrev,
-        OpenAddItemPicker,
+        OpenAddTerminalPicker,
     ]
 );
 
 #[derive(Clone, Debug, PartialEq, Action)]
 #[action(namespace = slerm, no_json)]
-pub struct ActiveItemSelectByIndex {
+pub struct ActiveTerminalSelectByIndex {
     pub index: usize,
 }

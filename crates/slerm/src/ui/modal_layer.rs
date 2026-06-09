@@ -1,10 +1,10 @@
 use gpui::{App, Entity, IntoElement, MouseButton, RenderOnce, Window, div, prelude::*, px, rgba};
 
-use crate::ui::add_item_picker::AddItemPicker;
+use crate::ui::add_terminal_picker::AddTerminalPicker;
 
 #[derive(Clone)]
 pub enum ActiveModal {
-    AddItemPicker(Entity<AddItemPicker>),
+    AddTerminalPicker(Entity<AddTerminalPicker>),
 }
 
 #[derive(IntoElement)]
@@ -33,7 +33,7 @@ impl RenderOnce for ModalLayer {
         let on_dismiss = self.on_dismiss;
 
         let modal = match active_modal {
-            ActiveModal::AddItemPicker(picker) => picker.into_any_element(),
+            ActiveModal::AddTerminalPicker(picker) => picker.into_any_element(),
         };
 
         div()

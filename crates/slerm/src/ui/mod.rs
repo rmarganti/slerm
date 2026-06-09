@@ -1,4 +1,4 @@
-pub mod add_item_picker;
+pub mod add_terminal_picker;
 pub mod fuzzy_finder;
 pub mod modal_layer;
 pub mod project_bar;

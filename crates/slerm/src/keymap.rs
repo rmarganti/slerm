@@ -2,8 +2,9 @@ use gpui::{App, KeyBinding};
 
 use crate::{
     actions::{
-        ActiveItemClose, ActiveItemCycleNext, ActiveItemCyclePrev, ActiveItemSelectByIndex,
-        ActiveProjectCycleNext, ActiveProjectCyclePrev, OpenAddItemPicker, Quit,
+        ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveTerminalClose,
+        ActiveTerminalCycleNext, ActiveTerminalCyclePrev, ActiveTerminalSelectByIndex,
+        OpenAddTerminalPicker, Quit,
     },
     ui::{
         fuzzy_finder::{
@@ -24,55 +25,55 @@ pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("ctrl-q", Quit, None),
-        KeyBinding::new("cmd-t", OpenAddItemPicker, Some(WORKSPACE_CONTEXT)),
-        KeyBinding::new("cmd-w", ActiveItemClose, Some(WORKSPACE_CONTEXT)),
-        KeyBinding::new("cmd-down", ActiveItemCycleNext, Some(WORKSPACE_CONTEXT)),
-        KeyBinding::new("cmd-j", ActiveItemCycleNext, Some(WORKSPACE_CONTEXT)),
-        KeyBinding::new("cmd-up", ActiveItemCyclePrev, Some(WORKSPACE_CONTEXT)),
-        KeyBinding::new("cmd-k", ActiveItemCyclePrev, Some(WORKSPACE_CONTEXT)),
+        KeyBinding::new("cmd-t", OpenAddTerminalPicker, Some(WORKSPACE_CONTEXT)),
+        KeyBinding::new("cmd-w", ActiveTerminalClose, Some(WORKSPACE_CONTEXT)),
+        KeyBinding::new("cmd-down", ActiveTerminalCycleNext, Some(WORKSPACE_CONTEXT)),
+        KeyBinding::new("cmd-j", ActiveTerminalCycleNext, Some(WORKSPACE_CONTEXT)),
+        KeyBinding::new("cmd-up", ActiveTerminalCyclePrev, Some(WORKSPACE_CONTEXT)),
+        KeyBinding::new("cmd-k", ActiveTerminalCyclePrev, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new(
             "cmd-1",
-            ActiveItemSelectByIndex { index: 0 },
+            ActiveTerminalSelectByIndex { index: 0 },
             Some(WORKSPACE_CONTEXT),
         ),
         KeyBinding::new(
             "cmd-2",
-            ActiveItemSelectByIndex { index: 1 },
+            ActiveTerminalSelectByIndex { index: 1 },
             Some(WORKSPACE_CONTEXT),
         ),
         KeyBinding::new(
             "cmd-3",
-            ActiveItemSelectByIndex { index: 2 },
+            ActiveTerminalSelectByIndex { index: 2 },
             Some(WORKSPACE_CONTEXT),
         ),
         KeyBinding::new(
             "cmd-4",
-            ActiveItemSelectByIndex { index: 3 },
+            ActiveTerminalSelectByIndex { index: 3 },
             Some(WORKSPACE_CONTEXT),
         ),
         KeyBinding::new(
             "cmd-5",
-            ActiveItemSelectByIndex { index: 4 },
+            ActiveTerminalSelectByIndex { index: 4 },
             Some(WORKSPACE_CONTEXT),
         ),
         KeyBinding::new(
             "cmd-6",
-            ActiveItemSelectByIndex { index: 5 },
+            ActiveTerminalSelectByIndex { index: 5 },
             Some(WORKSPACE_CONTEXT),
         ),
         KeyBinding::new(
             "cmd-7",
-            ActiveItemSelectByIndex { index: 6 },
+            ActiveTerminalSelectByIndex { index: 6 },
             Some(WORKSPACE_CONTEXT),
         ),
         KeyBinding::new(
             "cmd-8",
-            ActiveItemSelectByIndex { index: 7 },
+            ActiveTerminalSelectByIndex { index: 7 },
             Some(WORKSPACE_CONTEXT),
         ),
         KeyBinding::new(
             "cmd-9",
-            ActiveItemSelectByIndex { index: 8 },
+            ActiveTerminalSelectByIndex { index: 8 },
             Some(WORKSPACE_CONTEXT),
         ),
         KeyBinding::new("cmd-right", ActiveProjectCycleNext, Some(WORKSPACE_CONTEXT)),

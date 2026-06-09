@@ -73,26 +73,26 @@ impl RenderOnce for Sidebar {
 #[derive(IntoElement)]
 struct Section {
     label: &'static str,
-    items: Vec<ItemRow>,
+    terminals: Vec<TerminalRow>,
 }
 
 impl Section {
     fn new(project: &Project, label: &'static str) -> Self {
-        let items = project
-            .items_in_sidebar_order()
+        let terminals = project
+            .terminals_in_sidebar_order()
             .into_iter()
             .enumerate()
-            .filter(|(_, item)| item.kind.section_label() == label)
-            .map(|(index, item)| {
-                ItemRow::new(
-                    item.title.clone(),
-                    project.active_item == Some(item.id),
+            .filter(|(_, terminal)| terminal.kind.section_label() == label)
+            .map(|(index, terminal)| {
+                TerminalRow::new(
+                    terminal.title.clone(),
+                    project.active_terminal == Some(terminal.id),
                     (index < 9).then_some(index + 1),
                 )
             })
             .collect();
 
-        Self { label, items }
+        Self { label, terminals }
     }
 
     fn icon(&self) -> &'static str {
@@ -124,7 +124,7 @@ impl RenderOnce for Section {
                     .child(div().w(px(14.0)).child(self.icon()))
                     .child(tracked_uppercase(self.label)),
             )
-            .children(self.items)
+            .children(self.terminals)
     }
 }
 
@@ -138,17 +138,17 @@ fn tracked_uppercase(label: &str) -> String {
 }
 
 // ----------------------------------------------------------------
-// ItemRow
+// TerminalRow
 // ----------------------------------------------------------------
 
 #[derive(IntoElement)]
-struct ItemRow {
+struct TerminalRow {
     title: String,
     is_active: bool,
     keybinding_index: Option<usize>,
 }
 
-impl ItemRow {
+impl TerminalRow {
     fn new(title: String, is_active: bool, keybinding_index: Option<usize>) -> Self {
         Self {
             title,
@@ -158,7 +158,7 @@ impl ItemRow {
     }
 }
 
-impl RenderOnce for ItemRow {
+impl RenderOnce for TerminalRow {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let theme = theme::active();
 

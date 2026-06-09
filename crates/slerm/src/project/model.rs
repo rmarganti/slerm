@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::terminal::instance::{TerminalInstance, TerminalInstanceId};
+use crate::terminal::instance::{TerminalId, TerminalSpec};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct ProjectId(pub u64);
@@ -18,8 +18,8 @@ pub struct Project {
     pub id: ProjectId,
     pub name: String,
     pub path: PathBuf,
-    pub items: Vec<TerminalInstance>,
-    pub active_item: Option<TerminalInstanceId>,
+    pub terminals: Vec<TerminalSpec>,
+    pub active_terminal: Option<TerminalId>,
 }
 
 impl Project {
@@ -28,89 +28,96 @@ impl Project {
             id: ProjectId(id),
             name: name.into(),
             path: path.into(),
-            items: Vec::new(),
-            active_item: None,
+            terminals: Vec::new(),
+            active_terminal: None,
         }
     }
 
-    pub fn with_items(mut self, items: Vec<TerminalInstance>) -> Self {
-        self.active_item = items.first().map(|item| item.id);
-        self.items = items;
+    pub fn with_terminals(mut self, terminals: Vec<TerminalSpec>) -> Self {
+        self.active_terminal = terminals.first().map(|terminal| terminal.id);
+        self.terminals = terminals;
         self
     }
 
-    pub fn active_item(&self) -> Option<&TerminalInstance> {
-        let active_item = self.active_item?;
-        self.items.iter().find(|item| item.id == active_item)
+    pub fn active_terminal(&self) -> Option<&TerminalSpec> {
+        let active_terminal = self.active_terminal?;
+        self.terminals
+            .iter()
+            .find(|terminal| terminal.id == active_terminal)
     }
 
-    pub fn cycle_active_item(&mut self, direction: CycleDirection) {
-        let item_ids = self.item_ids_in_sidebar_order();
+    pub fn cycle_active_terminal(&mut self, direction: CycleDirection) {
+        let terminal_ids = self.terminal_ids_in_sidebar_order();
 
-        if item_ids.is_empty() {
-            self.active_item = None;
+        if terminal_ids.is_empty() {
+            self.active_terminal = None;
             return;
         }
 
         let next_index = self
-            .active_item
-            .and_then(|active_item| item_ids.iter().position(|item_id| *item_id == active_item))
+            .active_terminal
+            .and_then(|active_terminal| {
+                terminal_ids
+                    .iter()
+                    .position(|terminal_id| *terminal_id == active_terminal)
+            })
             .map(|active_index| match direction {
-                CycleDirection::Next => (active_index + 1) % item_ids.len(),
+                CycleDirection::Next => (active_index + 1) % terminal_ids.len(),
                 CycleDirection::Prev => active_index
                     .checked_sub(1)
-                    .unwrap_or_else(|| item_ids.len() - 1),
+                    .unwrap_or_else(|| terminal_ids.len() - 1),
             })
             .unwrap_or_else(|| match direction {
                 CycleDirection::Next => 0,
-                CycleDirection::Prev => item_ids.len() - 1,
+                CycleDirection::Prev => terminal_ids.len() - 1,
             });
 
-        self.active_item = Some(item_ids[next_index]);
+        self.active_terminal = Some(terminal_ids[next_index]);
     }
 
-    pub fn select_active_item_by_sidebar_index(&mut self, index: usize) {
-        if let Some(item_id) = self.item_ids_in_sidebar_order().get(index).copied() {
-            self.active_item = Some(item_id);
+    pub fn select_active_terminal_by_sidebar_index(&mut self, index: usize) {
+        if let Some(terminal_id) = self.terminal_ids_in_sidebar_order().get(index).copied() {
+            self.active_terminal = Some(terminal_id);
         }
     }
 
-    pub fn close_active_item(&mut self) {
-        let Some(active_item) = self.active_item else {
+    pub fn close_active_terminal(&mut self) {
+        let Some(active_terminal) = self.active_terminal else {
             return;
         };
 
-        let item_ids = self.item_ids_in_sidebar_order();
-        let closed_index = item_ids
+        let terminal_ids = self.terminal_ids_in_sidebar_order();
+        let closed_index = terminal_ids
             .iter()
-            .position(|item_id| *item_id == active_item)
+            .position(|terminal_id| *terminal_id == active_terminal)
             .unwrap_or(0);
 
-        self.items.retain(|item| item.id != active_item);
+        self.terminals
+            .retain(|terminal| terminal.id != active_terminal);
 
-        let remaining_item_ids = self.item_ids_in_sidebar_order();
-        self.active_item = if remaining_item_ids.is_empty() {
+        let remaining_terminal_ids = self.terminal_ids_in_sidebar_order();
+        self.active_terminal = if remaining_terminal_ids.is_empty() {
             None
         } else {
-            Some(remaining_item_ids[closed_index.min(remaining_item_ids.len() - 1)])
+            Some(remaining_terminal_ids[closed_index.min(remaining_terminal_ids.len() - 1)])
         };
     }
 
-    pub fn add_item(&mut self, item: TerminalInstance) {
-        self.active_item = Some(item.id);
-        self.items.push(item);
+    pub fn add_terminal(&mut self, terminal: TerminalSpec) {
+        self.active_terminal = Some(terminal.id);
+        self.terminals.push(terminal);
     }
 
-    pub fn items_in_sidebar_order(&self) -> Vec<&TerminalInstance> {
-        let mut items = self.items.iter().collect::<Vec<_>>();
-        items.sort_by_key(|item| item.kind.sidebar_order());
-        items
+    pub fn terminals_in_sidebar_order(&self) -> Vec<&TerminalSpec> {
+        let mut terminals = self.terminals.iter().collect::<Vec<_>>();
+        terminals.sort_by_key(|terminal| terminal.kind.sidebar_order());
+        terminals
     }
 
-    fn item_ids_in_sidebar_order(&self) -> Vec<TerminalInstanceId> {
-        self.items_in_sidebar_order()
+    fn terminal_ids_in_sidebar_order(&self) -> Vec<TerminalId> {
+        self.terminals_in_sidebar_order()
             .into_iter()
-            .map(|item| item.id)
+            .map(|terminal| terminal.id)
             .collect()
     }
 }

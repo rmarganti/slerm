@@ -8,7 +8,7 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub enum AddItemKind {
+pub enum AddTerminalKind {
     Terminal,
     #[allow(dead_code)]
     Agent(AgentKind),
@@ -16,11 +16,11 @@ pub enum AddItemKind {
     Command,
 }
 
-pub struct AddItemPicker {
-    finder: Entity<FuzzyFinder<AddItemKind>>,
+pub struct AddTerminalPicker {
+    finder: Entity<FuzzyFinder<AddTerminalKind>>,
 }
 
-impl AddItemPicker {
+impl AddTerminalPicker {
     pub fn new(
         workspace: Entity<WorkspaceState>,
         on_done: impl Fn(&mut Window, &mut gpui::App) + Clone + 'static,
@@ -33,10 +33,10 @@ impl AddItemPicker {
                 vec![FuzzyFinderItem::new(
                     "Terminal",
                     Some("Open a placeholder shell terminal"),
-                    AddItemKind::Terminal,
+                    AddTerminalKind::Terminal,
                 )],
                 move |kind, window, cx| match kind {
-                    AddItemKind::Terminal => {
+                    AddTerminalKind::Terminal => {
                         workspace.update(cx, |workspace, cx| {
                             workspace.add_terminal_to_active_project();
                             cx.notify();
@@ -46,7 +46,7 @@ impl AddItemPicker {
                         }
                         done_on_confirm(window, cx);
                     }
-                    AddItemKind::Agent(_) | AddItemKind::Command => {}
+                    AddTerminalKind::Agent(_) | AddTerminalKind::Command => {}
                 },
                 move |window, cx| on_done(window, cx),
                 cx,
@@ -56,13 +56,13 @@ impl AddItemPicker {
     }
 }
 
-impl Focusable for AddItemPicker {
+impl Focusable for AddTerminalPicker {
     fn focus_handle(&self, cx: &gpui::App) -> FocusHandle {
         self.finder.read(cx).focus_handle(cx)
     }
 }
 
-impl Render for AddItemPicker {
+impl Render for AddTerminalPicker {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         self.finder.clone()
     }

@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     project::model::{CycleDirection, Project, ProjectId},
     terminal::{
-        instance::TerminalInstance,
+        instance::TerminalSpec,
         kind::{AgentKind, TaskStatus, TerminalKind},
     },
 };
@@ -20,9 +20,9 @@ impl WorkspaceState {
         let zed_id = ProjectId(2);
         let notes_id = ProjectId(3);
 
-        let slerm =
-            Project::new(1, "slerm", "/Users/rmarganti/code/rmarganti/slerm").with_items(vec![
-                TerminalInstance::new(
+        let slerm = Project::new(1, "slerm", "/Users/rmarganti/code/rmarganti/slerm")
+            .with_terminals(vec![
+                TerminalSpec::new(
                     1,
                     slerm_id,
                     TerminalKind::Terminal,
@@ -30,7 +30,7 @@ impl WorkspaceState {
                     "/Users/rmarganti/code/rmarganti/slerm",
                     None::<String>,
                 ),
-                TerminalInstance::new(
+                TerminalSpec::new(
                     2,
                     slerm_id,
                     TerminalKind::Agent(AgentKind::Pi),
@@ -38,7 +38,7 @@ impl WorkspaceState {
                     "/Users/rmarganti/code/rmarganti/slerm",
                     Some("pi"),
                 ),
-                TerminalInstance::new(
+                TerminalSpec::new(
                     3,
                     slerm_id,
                     TerminalKind::Task {
@@ -48,7 +48,7 @@ impl WorkspaceState {
                     "/Users/rmarganti/code/rmarganti/slerm",
                     Some("cargo run -p slerm"),
                 ),
-                TerminalInstance::new(
+                TerminalSpec::new(
                     4,
                     slerm_id,
                     TerminalKind::Task {
@@ -60,8 +60,8 @@ impl WorkspaceState {
                 ),
             ]);
 
-        let zed = Project::new(2, "zed", "/Users/rmarganti/code/github/zed").with_items(vec![
-            TerminalInstance::new(
+        let zed = Project::new(2, "zed", "/Users/rmarganti/code/github/zed").with_terminals(vec![
+            TerminalSpec::new(
                 5,
                 zed_id,
                 TerminalKind::Agent(AgentKind::Codex),
@@ -71,8 +71,8 @@ impl WorkspaceState {
             ),
         ]);
 
-        let notes = Project::new(3, "notes", "/Users/rmarganti/notes").with_items(vec![
-            TerminalInstance::new(
+        let notes = Project::new(3, "notes", "/Users/rmarganti/notes").with_terminals(vec![
+            TerminalSpec::new(
                 6,
                 notes_id,
                 TerminalKind::Terminal,
@@ -80,7 +80,7 @@ impl WorkspaceState {
                 "/Users/rmarganti/notes",
                 None::<String>,
             ),
-            TerminalInstance::new(
+            TerminalSpec::new(
                 7,
                 notes_id,
                 TerminalKind::Task {
@@ -90,7 +90,7 @@ impl WorkspaceState {
                 "/Users/rmarganti/notes",
                 Some("git pull --rebase && git push"),
             ),
-            TerminalInstance::new(
+            TerminalSpec::new(
                 8,
                 notes_id,
                 TerminalKind::Task {
@@ -100,7 +100,7 @@ impl WorkspaceState {
                 "/Users/rmarganti/notes",
                 Some("make publish"),
             ),
-            TerminalInstance::new(
+            TerminalSpec::new(
                 9,
                 notes_id,
                 TerminalKind::Agent(AgentKind::OpenCode),
@@ -108,7 +108,7 @@ impl WorkspaceState {
                 "/Users/rmarganti/notes",
                 Some("opencode"),
             ),
-            TerminalInstance::new(
+            TerminalSpec::new(
                 10,
                 notes_id,
                 TerminalKind::Agent(AgentKind::Custom("Claude".to_string())),
@@ -133,15 +133,15 @@ impl WorkspaceState {
 
     pub fn add_terminal_to_active_project(
         &mut self,
-    ) -> Option<crate::terminal::instance::TerminalInstanceId> {
+    ) -> Option<crate::terminal::instance::TerminalId> {
         let active_project = self.active_project?;
-        let next_id = self.next_terminal_instance_id();
+        let next_id = self.next_terminal_id();
         let project = self
             .projects
             .iter_mut()
             .find(|project| project.id == active_project)?;
 
-        let terminal = TerminalInstance::new(
+        let terminal = TerminalSpec::new(
             next_id.0,
             project.id,
             TerminalKind::Terminal,
@@ -149,16 +149,16 @@ impl WorkspaceState {
             project.path.clone(),
             None::<String>,
         );
-        project.add_item(terminal);
+        project.add_terminal(terminal);
         Some(next_id)
     }
 
-    fn next_terminal_instance_id(&self) -> crate::terminal::instance::TerminalInstanceId {
-        crate::terminal::instance::TerminalInstanceId(
+    fn next_terminal_id(&self) -> crate::terminal::instance::TerminalId {
+        crate::terminal::instance::TerminalId(
             self.projects
                 .iter()
-                .flat_map(|project| project.items.iter())
-                .map(|item| item.id.0)
+                .flat_map(|project| project.terminals.iter())
+                .map(|terminal| terminal.id.0)
                 .max()
                 .unwrap_or(0)
                 + 1,
@@ -192,7 +192,7 @@ impl WorkspaceState {
         self.active_project = Some(self.projects[next_index].id);
     }
 
-    pub fn cycle_active_item(&mut self, direction: CycleDirection) {
+    pub fn cycle_active_terminal(&mut self, direction: CycleDirection) {
         let Some(active_project) = self.active_project else {
             return;
         };
@@ -202,11 +202,11 @@ impl WorkspaceState {
             .iter_mut()
             .find(|project| project.id == active_project)
         {
-            project.cycle_active_item(direction);
+            project.cycle_active_terminal(direction);
         }
     }
 
-    pub fn select_active_item_by_sidebar_index(&mut self, index: usize) {
+    pub fn select_active_terminal_by_sidebar_index(&mut self, index: usize) {
         let Some(active_project) = self.active_project else {
             return;
         };
@@ -216,11 +216,11 @@ impl WorkspaceState {
             .iter_mut()
             .find(|project| project.id == active_project)
         {
-            project.select_active_item_by_sidebar_index(index);
+            project.select_active_terminal_by_sidebar_index(index);
         }
     }
 
-    pub fn close_active_item(&mut self) {
+    pub fn close_active_terminal(&mut self) {
         let Some(active_project) = self.active_project else {
             return;
         };
@@ -230,7 +230,7 @@ impl WorkspaceState {
             .iter_mut()
             .find(|project| project.id == active_project)
         {
-            project.close_active_item();
+            project.close_active_terminal();
         }
     }
 }
