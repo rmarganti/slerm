@@ -214,10 +214,13 @@ impl Render for SlermApp {
                     .flex()
                     .flex_1()
                     .overflow_hidden()
-                    .child(Sidebar::new(self.workspace.clone()))
+                    .child(Sidebar::new(self.workspace.clone(), self.runtime.clone()))
                     .child(TerminalPane::new(self.workspace.clone())),
             )
-            .child(ProjectBar::new(self.workspace.clone()))
+            .child(ProjectBar::new(
+                self.workspace.clone(),
+                self.runtime.clone(),
+            ))
             .child(ModalLayer::new(self.active_modal.clone(), {
                 let app = cx.entity();
                 move |window, cx| {
