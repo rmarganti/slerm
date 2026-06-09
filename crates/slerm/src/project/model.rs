@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::terminal::instance::{TerminalId, TerminalSpec};
+use crate::terminal::spec::{TerminalId, TerminalSpec};
 
 /// Stable persisted identifier for a top-level project.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]

@@ -4,7 +4,7 @@ use crate::{
     project::model::{CycleDirection, Project, ProjectId},
     terminal::{
         extension::{AgentKind, AgentSpec, TaskSpec, TerminalExtensionSpec},
-        instance::{ProcessSpec, TerminalSpec},
+        spec::{ProcessSpec, TerminalSpec},
     },
 };
 
@@ -150,8 +150,8 @@ impl WorkspaceState {
         Some(terminal)
     }
 
-    fn next_terminal_id(&self) -> crate::terminal::instance::TerminalId {
-        crate::terminal::instance::TerminalId(
+    fn next_terminal_id(&self) -> crate::terminal::spec::TerminalId {
+        crate::terminal::spec::TerminalId(
             self.projects
                 .iter()
                 .flat_map(|project| project.terminals.iter())
@@ -217,7 +217,7 @@ impl WorkspaceState {
         }
     }
 
-    pub fn close_active_terminal(&mut self) -> Option<crate::terminal::instance::TerminalId> {
+    pub fn close_active_terminal(&mut self) -> Option<crate::terminal::spec::TerminalId> {
         let active_project = self.active_project?;
 
         self.projects

@@ -1,2 +1,4 @@
 pub mod extension;
-pub mod instance;
+pub mod spec;
+
+pub use spec::{ProcessSpec, TerminalId, TerminalSpec};
