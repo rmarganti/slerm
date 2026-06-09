@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     project::model::{CycleDirection, Project, ProjectId},
     terminal::{
-        instance::TerminalSpec,
+        instance::{ProcessSpec, TerminalSpec},
         kind::{AgentKind, TaskStatus, TerminalKind},
     },
 };
@@ -28,7 +28,7 @@ impl WorkspaceState {
                     TerminalKind::Terminal,
                     "shell",
                     "/Users/rmarganti/code/rmarganti/slerm",
-                    None::<String>,
+                    ProcessSpec::shell(),
                 ),
                 TerminalSpec::new(
                     2,
@@ -36,7 +36,7 @@ impl WorkspaceState {
                     TerminalKind::Agent(AgentKind::Pi),
                     "pi coding agent",
                     "/Users/rmarganti/code/rmarganti/slerm",
-                    Some("pi"),
+                    ProcessSpec::new("pi", [] as [&str; 0]),
                 ),
                 TerminalSpec::new(
                     3,
@@ -46,7 +46,7 @@ impl WorkspaceState {
                     },
                     "cargo run",
                     "/Users/rmarganti/code/rmarganti/slerm",
-                    Some("cargo run -p slerm"),
+                    ProcessSpec::new("cargo", ["run", "-p", "slerm"]),
                 ),
                 TerminalSpec::new(
                     4,
@@ -56,7 +56,7 @@ impl WorkspaceState {
                     },
                     "cargo test",
                     "/Users/rmarganti/code/rmarganti/slerm",
-                    Some("cargo test"),
+                    ProcessSpec::new("cargo", ["test"]),
                 ),
             ]);
 
@@ -67,7 +67,7 @@ impl WorkspaceState {
                 TerminalKind::Agent(AgentKind::Codex),
                 "codex",
                 "/Users/rmarganti/code/github/zed",
-                Some("codex"),
+                ProcessSpec::new("codex", [] as [&str; 0]),
             ),
         ]);
 
@@ -78,7 +78,7 @@ impl WorkspaceState {
                 TerminalKind::Terminal,
                 "shell",
                 "/Users/rmarganti/notes",
-                None::<String>,
+                ProcessSpec::shell(),
             ),
             TerminalSpec::new(
                 7,
@@ -88,7 +88,7 @@ impl WorkspaceState {
                 },
                 "sync vault",
                 "/Users/rmarganti/notes",
-                Some("git pull --rebase && git push"),
+                ProcessSpec::shell_command("git pull --rebase && git push"),
             ),
             TerminalSpec::new(
                 8,
@@ -98,7 +98,7 @@ impl WorkspaceState {
                 },
                 "publish",
                 "/Users/rmarganti/notes",
-                Some("make publish"),
+                ProcessSpec::new("make", ["publish"]),
             ),
             TerminalSpec::new(
                 9,
@@ -106,7 +106,7 @@ impl WorkspaceState {
                 TerminalKind::Agent(AgentKind::OpenCode),
                 "opencode",
                 "/Users/rmarganti/notes",
-                Some("opencode"),
+                ProcessSpec::new("opencode", [] as [&str; 0]),
             ),
             TerminalSpec::new(
                 10,
@@ -114,7 +114,7 @@ impl WorkspaceState {
                 TerminalKind::Agent(AgentKind::Custom("Claude".to_string())),
                 "claude",
                 "/Users/rmarganti/notes",
-                Some("claude"),
+                ProcessSpec::new("claude", [] as [&str; 0]),
             ),
         ]);
 
@@ -147,7 +147,7 @@ impl WorkspaceState {
             TerminalKind::Terminal,
             "shell",
             project.path.clone(),
-            None::<String>,
+            ProcessSpec::shell(),
         );
         project.add_terminal(terminal);
         Some(next_id)

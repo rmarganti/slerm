@@ -28,7 +28,7 @@ impl RenderOnce for TerminalPane {
             .map(|terminal| terminal.cwd.display().to_string())
             .unwrap_or_default();
         let command = active_terminal
-            .and_then(|terminal| terminal.command.clone())
+            .map(|terminal| terminal.command.display_command_line())
             .unwrap_or_else(|| "$SHELL".to_string());
         let project_id = active_terminal
             .map(|terminal| format!("project #{}", terminal.project_id.0))
