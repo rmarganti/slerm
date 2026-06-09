@@ -60,7 +60,7 @@ impl RenderOnce for ProjectBar {
             .text_color(theme.minus1)
             .child(div().flex().items_center().gap_4().children(projects))
             .child(div().child(
-                "cmd-←/→ project · cmd-option-1..9 select project · cmd-↑/↓ terminal · cmd-w close · cmd-q quit",
+                "cmd-←/→ project · cmd-alt-1..9 select project · cmd-↑/↓ terminal · cmd-w close · cmd-q quit",
             ))
     }
 }
