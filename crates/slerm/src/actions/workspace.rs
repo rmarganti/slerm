@@ -8,6 +8,7 @@ actions!(
         ActiveTerminalClose,
         ActiveProjectCycleNext,
         ActiveProjectCyclePrev,
+        ActiveProjectRemove,
         OpenProjectPicker,
         OpenAddTerminalPicker,
     ]

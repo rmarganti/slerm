@@ -2,9 +2,10 @@ use gpui::{App, KeyBinding};
 
 use crate::{
     actions::{
-        ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveProjectSelectByIndex,
-        ActiveTerminalClose, ActiveTerminalCycleNext, ActiveTerminalCyclePrev,
-        ActiveTerminalSelectByIndex, OpenAddTerminalPicker, OpenProjectPicker, Quit,
+        ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveProjectRemove,
+        ActiveProjectSelectByIndex, ActiveTerminalClose, ActiveTerminalCycleNext,
+        ActiveTerminalCyclePrev, ActiveTerminalSelectByIndex, OpenAddTerminalPicker,
+        OpenProjectPicker, Quit,
     },
     ui::{
         fuzzy_finder::{
@@ -28,6 +29,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-t", OpenAddTerminalPicker, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-alt-o", OpenProjectPicker, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-w", ActiveTerminalClose, Some(WORKSPACE_CONTEXT)),
+        KeyBinding::new("cmd-shift-w", ActiveProjectRemove, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-down", ActiveTerminalCycleNext, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-j", ActiveTerminalCycleNext, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-up", ActiveTerminalCyclePrev, Some(WORKSPACE_CONTEXT)),
