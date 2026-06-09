@@ -3,8 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     project::model::{CycleDirection, Project, ProjectId},
     terminal::{
+        extension::{AgentKind, AgentSpec, TaskSpec, TerminalExtensionSpec},
         instance::{ProcessSpec, TerminalSpec},
-        kind::{AgentKind, TaskStatus, TerminalKind},
     },
 };
 
@@ -25,7 +25,7 @@ impl WorkspaceState {
                 TerminalSpec::new(
                     1,
                     slerm_id,
-                    TerminalKind::Terminal,
+                    TerminalExtensionSpec::Plain,
                     "shell",
                     "/Users/rmarganti/code/rmarganti/slerm",
                     ProcessSpec::shell(),
@@ -33,7 +33,7 @@ impl WorkspaceState {
                 TerminalSpec::new(
                     2,
                     slerm_id,
-                    TerminalKind::Agent(AgentKind::Pi),
+                    TerminalExtensionSpec::Agent(AgentSpec::new(AgentKind::Pi)),
                     "pi coding agent",
                     "/Users/rmarganti/code/rmarganti/slerm",
                     ProcessSpec::new("pi", [] as [&str; 0]),
@@ -41,9 +41,7 @@ impl WorkspaceState {
                 TerminalSpec::new(
                     3,
                     slerm_id,
-                    TerminalKind::Task {
-                        status: TaskStatus::Running,
-                    },
+                    TerminalExtensionSpec::Task(TaskSpec::default()),
                     "cargo run",
                     "/Users/rmarganti/code/rmarganti/slerm",
                     ProcessSpec::new("cargo", ["run", "-p", "slerm"]),
@@ -51,9 +49,7 @@ impl WorkspaceState {
                 TerminalSpec::new(
                     4,
                     slerm_id,
-                    TerminalKind::Task {
-                        status: TaskStatus::Idle,
-                    },
+                    TerminalExtensionSpec::Task(TaskSpec::default()),
                     "cargo test",
                     "/Users/rmarganti/code/rmarganti/slerm",
                     ProcessSpec::new("cargo", ["test"]),
@@ -64,7 +60,7 @@ impl WorkspaceState {
             TerminalSpec::new(
                 5,
                 zed_id,
-                TerminalKind::Agent(AgentKind::Codex),
+                TerminalExtensionSpec::Agent(AgentSpec::new(AgentKind::Codex)),
                 "codex",
                 "/Users/rmarganti/code/github/zed",
                 ProcessSpec::new("codex", [] as [&str; 0]),
@@ -75,7 +71,7 @@ impl WorkspaceState {
             TerminalSpec::new(
                 6,
                 notes_id,
-                TerminalKind::Terminal,
+                TerminalExtensionSpec::Plain,
                 "shell",
                 "/Users/rmarganti/notes",
                 ProcessSpec::shell(),
@@ -83,9 +79,7 @@ impl WorkspaceState {
             TerminalSpec::new(
                 7,
                 notes_id,
-                TerminalKind::Task {
-                    status: TaskStatus::Succeeded,
-                },
+                TerminalExtensionSpec::Task(TaskSpec::default()),
                 "sync vault",
                 "/Users/rmarganti/notes",
                 ProcessSpec::shell_command("git pull --rebase && git push"),
@@ -93,9 +87,7 @@ impl WorkspaceState {
             TerminalSpec::new(
                 8,
                 notes_id,
-                TerminalKind::Task {
-                    status: TaskStatus::Failed,
-                },
+                TerminalExtensionSpec::Task(TaskSpec::default()),
                 "publish",
                 "/Users/rmarganti/notes",
                 ProcessSpec::new("make", ["publish"]),
@@ -103,7 +95,7 @@ impl WorkspaceState {
             TerminalSpec::new(
                 9,
                 notes_id,
-                TerminalKind::Agent(AgentKind::OpenCode),
+                TerminalExtensionSpec::Agent(AgentSpec::new(AgentKind::OpenCode)),
                 "opencode",
                 "/Users/rmarganti/notes",
                 ProcessSpec::new("opencode", [] as [&str; 0]),
@@ -111,7 +103,9 @@ impl WorkspaceState {
             TerminalSpec::new(
                 10,
                 notes_id,
-                TerminalKind::Agent(AgentKind::Custom("Claude".to_string())),
+                TerminalExtensionSpec::Agent(AgentSpec::new(AgentKind::Custom(
+                    "Claude".to_string(),
+                ))),
                 "claude",
                 "/Users/rmarganti/notes",
                 ProcessSpec::new("claude", [] as [&str; 0]),
@@ -144,7 +138,7 @@ impl WorkspaceState {
         let terminal = TerminalSpec::new(
             next_id.0,
             project.id,
-            TerminalKind::Terminal,
+            TerminalExtensionSpec::Plain,
             "shell",
             project.path.clone(),
             ProcessSpec::shell(),

@@ -1,2 +1,2 @@
+pub mod extension;
 pub mod instance;
-pub mod kind;

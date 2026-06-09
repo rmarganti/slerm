@@ -2,7 +2,7 @@ use std::{collections::BTreeMap, env, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::{project::model::ProjectId, terminal::kind::TerminalKind};
+use crate::{project::model::ProjectId, terminal::extension::TerminalExtensionSpec};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct TerminalId(pub u64);
@@ -58,7 +58,7 @@ fn quote_command_part(part: &str) -> String {
 pub struct TerminalSpec {
     pub id: TerminalId,
     pub project_id: ProjectId,
-    pub kind: TerminalKind,
+    pub extension: TerminalExtensionSpec,
     pub title: String,
     pub cwd: PathBuf,
     pub command: ProcessSpec,
@@ -68,7 +68,7 @@ impl TerminalSpec {
     pub fn new(
         id: u64,
         project_id: ProjectId,
-        kind: TerminalKind,
+        extension: TerminalExtensionSpec,
         title: impl Into<String>,
         cwd: impl Into<PathBuf>,
         command: ProcessSpec,
@@ -76,7 +76,7 @@ impl TerminalSpec {
         Self {
             id: TerminalId(id),
             project_id,
-            kind,
+            extension,
             title: title.into(),
             cwd: cwd.into(),
             command,

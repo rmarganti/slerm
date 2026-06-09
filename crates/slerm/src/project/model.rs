@@ -110,7 +110,7 @@ impl Project {
 
     pub fn terminals_in_sidebar_order(&self) -> Vec<&TerminalSpec> {
         let mut terminals = self.terminals.iter().collect::<Vec<_>>();
-        terminals.sort_by_key(|terminal| terminal.kind.sidebar_order());
+        terminals.sort_by_key(|terminal| terminal.extension.sidebar_order());
         terminals
     }
 

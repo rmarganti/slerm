@@ -82,7 +82,7 @@ impl Section {
             .terminals_in_sidebar_order()
             .into_iter()
             .enumerate()
-            .filter(|(_, terminal)| terminal.kind.section_label() == label)
+            .filter(|(_, terminal)| terminal.extension.section_label() == label)
             .map(|(index, terminal)| {
                 TerminalRow::new(
                     terminal.title.clone(),

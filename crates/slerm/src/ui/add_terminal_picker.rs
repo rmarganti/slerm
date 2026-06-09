@@ -2,13 +2,13 @@ use gpui::{AppContext, Context, Entity, FocusHandle, Focusable, IntoElement, Ren
 
 use crate::{
     storage,
-    terminal::kind::AgentKind,
+    terminal::extension::AgentKind,
     ui::fuzzy_finder::{FuzzyFinder, FuzzyFinderItem},
     workspace::model::WorkspaceState,
 };
 
 #[derive(Clone, Debug)]
-pub enum AddTerminalKind {
+pub enum AddTerminalChoice {
     Terminal,
     #[allow(dead_code)]
     Agent(AgentKind),
@@ -17,7 +17,7 @@ pub enum AddTerminalKind {
 }
 
 pub struct AddTerminalPicker {
-    finder: Entity<FuzzyFinder<AddTerminalKind>>,
+    finder: Entity<FuzzyFinder<AddTerminalChoice>>,
 }
 
 impl AddTerminalPicker {
@@ -33,10 +33,10 @@ impl AddTerminalPicker {
                 vec![FuzzyFinderItem::new(
                     "Terminal",
                     Some("Open a placeholder shell terminal"),
-                    AddTerminalKind::Terminal,
+                    AddTerminalChoice::Terminal,
                 )],
                 move |kind, window, cx| match kind {
-                    AddTerminalKind::Terminal => {
+                    AddTerminalChoice::Terminal => {
                         workspace.update(cx, |workspace, cx| {
                             workspace.add_terminal_to_active_project();
                             cx.notify();
@@ -46,7 +46,7 @@ impl AddTerminalPicker {
                         }
                         done_on_confirm(window, cx);
                     }
-                    AddTerminalKind::Agent(_) | AddTerminalKind::Command => {}
+                    AddTerminalChoice::Agent(_) | AddTerminalChoice::Command => {}
                 },
                 move |window, cx| on_done(window, cx),
                 cx,
