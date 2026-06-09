@@ -7,6 +7,7 @@ use crate::{
         OpenAddTerminalPicker,
     },
     project::model::CycleDirection,
+    runtime::TerminalRuntimeService,
     storage, theme,
     ui::{
         add_terminal_picker::AddTerminalPicker,
@@ -20,14 +21,18 @@ use crate::{
 
 pub struct SlermApp {
     workspace: Entity<WorkspaceState>,
+    runtime: Entity<TerminalRuntimeService>,
     focus_handle: FocusHandle,
     active_modal: Option<ActiveModal>,
 }
 
 impl SlermApp {
     pub fn new(workspace: WorkspaceState, cx: &mut Context<Self>) -> Self {
+        let runtime = TerminalRuntimeService::from_workspace(&workspace);
+
         Self {
             workspace: cx.new(|_| workspace),
+            runtime: cx.new(|_| runtime),
             focus_handle: cx.focus_handle(),
             active_modal: None,
         }
@@ -79,9 +84,11 @@ impl SlermApp {
     ) {
         let app = cx.entity();
         let workspace = self.workspace.clone();
+        let runtime = self.runtime.clone();
         let picker = cx.new(|cx| {
             AddTerminalPicker::new(
                 workspace,
+                runtime,
                 move |window, cx| {
                     app.update(cx, |app, cx| {
                         app.active_modal = None;
@@ -124,9 +131,15 @@ impl SlermApp {
     }
 
     fn close_active_terminal(&mut self, cx: &mut Context<Self>) {
-        self.update_workspace(cx, |workspace| {
-            workspace.close_active_terminal();
-        });
+        let closed_terminal =
+            self.update_workspace(cx, |workspace| workspace.close_active_terminal());
+
+        if let Some(terminal_id) = closed_terminal {
+            self.runtime.update(cx, |runtime, cx| {
+                runtime.remove_terminal(terminal_id);
+                cx.notify();
+            });
+        }
     }
 
     fn cycle_active_terminal(&mut self, direction: CycleDirection, cx: &mut Context<Self>) {
@@ -147,14 +160,15 @@ impl SlermApp {
         });
     }
 
-    fn update_workspace(
+    fn update_workspace<T>(
         &mut self,
         cx: &mut Context<Self>,
-        update: impl FnOnce(&mut WorkspaceState),
-    ) {
-        self.workspace.update(cx, |workspace, cx| {
-            update(workspace);
+        update: impl FnOnce(&mut WorkspaceState) -> T,
+    ) -> T {
+        let output = self.workspace.update(cx, |workspace, cx| {
+            let output = update(workspace);
             cx.notify();
+            output
         });
 
         if let Err(error) = storage::save_workspace(self.workspace.read(cx)) {
@@ -162,6 +176,7 @@ impl SlermApp {
         }
 
         cx.notify();
+        output
     }
 }
 

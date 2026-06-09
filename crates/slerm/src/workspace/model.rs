@@ -214,17 +214,12 @@ impl WorkspaceState {
         }
     }
 
-    pub fn close_active_terminal(&mut self) {
-        let Some(active_project) = self.active_project else {
-            return;
-        };
+    pub fn close_active_terminal(&mut self) -> Option<crate::terminal::instance::TerminalId> {
+        let active_project = self.active_project?;
 
-        if let Some(project) = self
-            .projects
+        self.projects
             .iter_mut()
-            .find(|project| project.id == active_project)
-        {
-            project.close_active_terminal();
-        }
+            .find(|project| project.id == active_project)?
+            .close_active_terminal()
     }
 }

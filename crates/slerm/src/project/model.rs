@@ -81,10 +81,8 @@ impl Project {
         }
     }
 
-    pub fn close_active_terminal(&mut self) {
-        let Some(active_terminal) = self.active_terminal else {
-            return;
-        };
+    pub fn close_active_terminal(&mut self) -> Option<TerminalId> {
+        let active_terminal = self.active_terminal?;
 
         let terminal_ids = self.terminal_ids_in_sidebar_order();
         let closed_index = terminal_ids
@@ -101,6 +99,8 @@ impl Project {
         } else {
             Some(remaining_terminal_ids[closed_index.min(remaining_terminal_ids.len() - 1)])
         };
+
+        Some(active_terminal)
     }
 
     pub fn add_terminal(&mut self, terminal: TerminalSpec) {
