@@ -1,4 +1,7 @@
-use gpui::{Context, Entity, FocusHandle, Focusable, IntoElement, Render, Window, div, prelude::*};
+use gpui::{
+    Context, Entity, FocusHandle, Focusable, IntoElement, PathPromptOptions, Render, Window, div,
+    prelude::*,
+};
 
 use crate::{
     actions::{
@@ -7,7 +10,6 @@ use crate::{
         ActiveTerminalCyclePrev, ActiveTerminalSelectByIndex, OpenAddProjectPicker,
         OpenAddTerminalPicker, OpenProjectPicker,
     },
-    native_dialog,
     project::model::CycleDirection,
     runtime::TerminalRuntimeService,
     storage, theme,
@@ -129,10 +131,33 @@ impl SlermApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if let Some(path) = native_dialog::pick_project_folder() {
-            self.add_project(path, cx);
-        }
-        self.focus_handle.focus(window);
+        let paths = cx.prompt_for_paths(PathPromptOptions {
+            files: false,
+            directories: true,
+            multiple: false,
+            prompt: Some("Add Project".into()),
+        });
+
+        cx.spawn_in(window, async move |app, cx| {
+            let selected_path = match paths.await {
+                Ok(Ok(Some(mut paths))) => paths.pop(),
+                Ok(Ok(None)) => None,
+                Ok(Err(error)) => {
+                    eprintln!("failed to open project folder picker: {error}");
+                    None
+                }
+                Err(_) => None,
+            };
+
+            app.update_in(cx, |app, window, cx| {
+                if let Some(path) = selected_path {
+                    app.add_project(path, cx);
+                }
+                app.focus_handle.focus(window);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn open_project_picker(
