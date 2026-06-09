@@ -6,12 +6,13 @@ use crate::{
         ActiveProjectMoveRight, ActiveProjectRemove, ActiveProjectSelectByIndex,
         ActiveTerminalClose, ActiveTerminalCycleNext, ActiveTerminalCyclePrev,
         ActiveTerminalSelectByIndex, OpenAddProjectPicker, OpenAddTerminalPicker,
-        OpenProjectPicker, Quit,
+        OpenProjectPicker, OpenRenameProjectModal, Quit,
     },
     ui::{
         fuzzy_finder::{
             FuzzyFinderCancel, FuzzyFinderConfirm, FuzzyFinderSelectNext, FuzzyFinderSelectPrev,
         },
+        rename_project_modal::{RenameProjectCancel, RenameProjectConfirm},
         text_input::{
             TextInputBackspace, TextInputDelete, TextInputMoveLeft, TextInputMoveRight,
             TextInputMoveToEnd, TextInputMoveToStart, TextInputPaste,
@@ -22,6 +23,7 @@ use crate::{
 const WORKSPACE_CONTEXT: &str = "workspace";
 const TEXT_INPUT_CONTEXT: &str = "TextInput";
 const FUZZY_FINDER_CONTEXT: &str = "FuzzyFinder";
+const RENAME_PROJECT_MODAL_CONTEXT: &str = "RenameProjectModal";
 
 pub fn init(cx: &mut App) {
     cx.bind_keys([
@@ -30,6 +32,11 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-t", OpenAddTerminalPicker, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-shift-n", OpenAddProjectPicker, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-alt-o", OpenProjectPicker, Some(WORKSPACE_CONTEXT)),
+        KeyBinding::new(
+            "cmd-shift-r",
+            OpenRenameProjectModal,
+            Some(WORKSPACE_CONTEXT),
+        ),
         KeyBinding::new("cmd-w", ActiveTerminalClose, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-shift-w", ActiveProjectRemove, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-down", ActiveTerminalCycleNext, Some(WORKSPACE_CONTEXT)),
@@ -90,11 +97,7 @@ pub fn init(cx: &mut App) {
             ActiveProjectMoveLeft,
             Some(WORKSPACE_CONTEXT),
         ),
-        KeyBinding::new(
-            "ctrl-cmd-h",
-            ActiveProjectMoveLeft,
-            Some(WORKSPACE_CONTEXT),
-        ),
+        KeyBinding::new("ctrl-cmd-h", ActiveProjectMoveLeft, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new(
             "ctrl-cmd-right",
             ActiveProjectMoveRight,
@@ -169,5 +172,15 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("ctrl-n", FuzzyFinderSelectNext, Some(FUZZY_FINDER_CONTEXT)),
         KeyBinding::new("enter", FuzzyFinderConfirm, Some(FUZZY_FINDER_CONTEXT)),
         KeyBinding::new("escape", FuzzyFinderCancel, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new(
+            "enter",
+            RenameProjectConfirm,
+            Some(RENAME_PROJECT_MODAL_CONTEXT),
+        ),
+        KeyBinding::new(
+            "escape",
+            RenameProjectCancel,
+            Some(RENAME_PROJECT_MODAL_CONTEXT),
+        ),
     ]);
 }

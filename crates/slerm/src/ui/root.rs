@@ -9,7 +9,7 @@ use crate::{
         ActiveProjectMoveRight, ActiveProjectRemove, ActiveProjectSelectByIndex,
         ActiveTerminalClose, ActiveTerminalCycleNext, ActiveTerminalCyclePrev,
         ActiveTerminalSelectByIndex, OpenAddProjectPicker, OpenAddTerminalPicker,
-        OpenProjectPicker,
+        OpenProjectPicker, OpenRenameProjectModal,
     },
     project::model::CycleDirection,
     runtime::TerminalRuntimeService,
@@ -19,6 +19,7 @@ use crate::{
         modal_layer::{ActiveModal, ModalLayer},
         project_bar::ProjectBar,
         project_picker::ProjectPicker,
+        rename_project_modal::RenameProjectModal,
         sidebar::Sidebar,
         terminal_pane::TerminalPane,
     },
@@ -207,6 +208,45 @@ impl SlermApp {
         }
     }
 
+    fn open_rename_project_modal(
+        &mut self,
+        _: &OpenRenameProjectModal,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(current_name) = self
+            .workspace
+            .read(cx)
+            .active_project()
+            .map(|project| project.name.clone())
+        else {
+            self.focus_handle.focus(window);
+            return;
+        };
+
+        let app = cx.entity();
+        let workspace = self.workspace.clone();
+        let modal = cx.new(|cx| {
+            RenameProjectModal::new(
+                workspace,
+                current_name,
+                move |window, cx| {
+                    app.update(cx, |app, cx| {
+                        app.active_modal = None;
+                        app.focus_handle.focus(window);
+                        cx.notify();
+                    });
+                },
+                cx,
+            )
+        });
+        self.active_modal = Some(ActiveModal::RenameProjectModal(modal));
+        cx.notify();
+        if let Some(ActiveModal::RenameProjectModal(modal)) = &self.active_modal {
+            modal.read(cx).focus_handle(cx).focus(window);
+        }
+    }
+
     fn dismiss_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.active_modal = None;
         self.focus_handle.focus(window);
@@ -357,6 +397,7 @@ impl Render for SlermApp {
             .on_action(cx.listener(Self::open_add_terminal_picker))
             .on_action(cx.listener(Self::open_add_project_picker))
             .on_action(cx.listener(Self::open_project_picker))
+            .on_action(cx.listener(Self::open_rename_project_modal))
             .size_full()
             .flex()
             .flex_col()

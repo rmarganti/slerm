@@ -1,12 +1,16 @@
 use gpui::{App, Entity, IntoElement, MouseButton, RenderOnce, Window, div, prelude::*, px, rgba};
 
-use crate::ui::{add_terminal_picker::AddTerminalPicker, project_picker::ProjectPicker};
+use crate::ui::{
+    add_terminal_picker::AddTerminalPicker, project_picker::ProjectPicker,
+    rename_project_modal::RenameProjectModal,
+};
 
 /// Modal routes that can temporarily take focus over the workspace.
 #[derive(Clone)]
 pub enum ActiveModal {
     AddTerminalPicker(Entity<AddTerminalPicker>),
     ProjectPicker(Entity<ProjectPicker>),
+    RenameProjectModal(Entity<RenameProjectModal>),
 }
 
 type DismissHandler = dyn Fn(&mut Window, &mut App) + 'static;
@@ -40,6 +44,7 @@ impl RenderOnce for ModalLayer {
         let modal = match active_modal {
             ActiveModal::AddTerminalPicker(picker) => picker.into_any_element(),
             ActiveModal::ProjectPicker(picker) => picker.into_any_element(),
+            ActiveModal::RenameProjectModal(modal) => modal.into_any_element(),
         };
 
         div()

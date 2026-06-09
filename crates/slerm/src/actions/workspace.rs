@@ -13,6 +13,7 @@ actions!(
         ActiveProjectRemove,
         OpenAddProjectPicker,
         OpenProjectPicker,
+        OpenRenameProjectModal,
         OpenAddTerminalPicker,
     ]
 );
