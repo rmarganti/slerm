@@ -51,7 +51,6 @@ impl RenderOnce for ProjectBar {
         div()
             .flex()
             .items_center()
-            .justify_between()
             .px_3()
             .py_1()
             .border_t_1()
@@ -59,6 +58,5 @@ impl RenderOnce for ProjectBar {
             .text_xs()
             .text_color(theme.minus1)
             .child(div().flex().items_center().gap_4().children(projects))
-            .child(div().child("cmd-←/→ project · cmd-↑/↓ terminal · cmd-w close · cmd-q quit"))
     }
 }
