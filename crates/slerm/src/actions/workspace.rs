@@ -9,6 +9,7 @@ actions!(
         ActiveProjectCycleNext,
         ActiveProjectCyclePrev,
         ActiveProjectRemove,
+        OpenAddProjectPicker,
         OpenProjectPicker,
         OpenAddTerminalPicker,
     ]

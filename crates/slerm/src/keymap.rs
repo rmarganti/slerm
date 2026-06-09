@@ -4,8 +4,8 @@ use crate::{
     actions::{
         ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveProjectRemove,
         ActiveProjectSelectByIndex, ActiveTerminalClose, ActiveTerminalCycleNext,
-        ActiveTerminalCyclePrev, ActiveTerminalSelectByIndex, OpenAddTerminalPicker,
-        OpenProjectPicker, Quit,
+        ActiveTerminalCyclePrev, ActiveTerminalSelectByIndex, OpenAddProjectPicker,
+        OpenAddTerminalPicker, OpenProjectPicker, Quit,
     },
     ui::{
         fuzzy_finder::{
@@ -27,6 +27,7 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("ctrl-q", Quit, None),
         KeyBinding::new("cmd-t", OpenAddTerminalPicker, Some(WORKSPACE_CONTEXT)),
+        KeyBinding::new("cmd-shift-n", OpenAddProjectPicker, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-alt-o", OpenProjectPicker, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-w", ActiveTerminalClose, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-shift-w", ActiveProjectRemove, Some(WORKSPACE_CONTEXT)),

@@ -1,6 +1,7 @@
 mod actions;
 mod app;
 mod keymap;
+mod native_dialog;
 mod project;
 pub mod runtime;
 mod storage;

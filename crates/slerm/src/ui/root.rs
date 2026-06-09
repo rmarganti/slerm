@@ -4,9 +4,10 @@ use crate::{
     actions::{
         ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveProjectRemove,
         ActiveProjectSelectByIndex, ActiveTerminalClose, ActiveTerminalCycleNext,
-        ActiveTerminalCyclePrev, ActiveTerminalSelectByIndex, OpenAddTerminalPicker,
-        OpenProjectPicker,
+        ActiveTerminalCyclePrev, ActiveTerminalSelectByIndex, OpenAddProjectPicker,
+        OpenAddTerminalPicker, OpenProjectPicker,
     },
+    native_dialog,
     project::model::CycleDirection,
     runtime::TerminalRuntimeService,
     storage, theme,
@@ -122,6 +123,18 @@ impl SlermApp {
         }
     }
 
+    fn open_add_project_picker(
+        &mut self,
+        _: &OpenAddProjectPicker,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(path) = native_dialog::pick_project_folder() {
+            self.add_project(path, cx);
+        }
+        self.focus_handle.focus(window);
+    }
+
     fn open_project_picker(
         &mut self,
         _: &OpenProjectPicker,
@@ -209,6 +222,17 @@ impl SlermApp {
         }
     }
 
+    fn add_project(&mut self, path: impl Into<std::path::PathBuf>, cx: &mut Context<Self>) {
+        let project = self.update_workspace(cx, |workspace| workspace.add_project(path));
+
+        self.runtime.update(cx, |runtime, cx| {
+            for terminal in &project.terminals {
+                runtime.ensure_terminal(terminal);
+            }
+            cx.notify();
+        });
+    }
+
     fn cycle_active_terminal(&mut self, direction: CycleDirection, cx: &mut Context<Self>) {
         self.update_workspace(cx, |workspace| {
             workspace.cycle_active_terminal(direction);
@@ -279,6 +303,7 @@ impl Render for SlermApp {
             .on_action(cx.listener(Self::active_project_remove))
             .on_action(cx.listener(Self::active_project_select_by_index))
             .on_action(cx.listener(Self::open_add_terminal_picker))
+            .on_action(cx.listener(Self::open_add_project_picker))
             .on_action(cx.listener(Self::open_project_picker))
             .size_full()
             .flex()
