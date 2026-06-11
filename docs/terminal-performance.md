@@ -12,7 +12,7 @@ Each line includes:
 - PTY drain duration, bytes read, and changed terminal count
 - libghostty snapshot/update duration
 - rows and cells considered for rendering
-- render items produced by the current per-cell snapshot path
+- render items produced by the current row/run snapshot path
 - GPUI `shape_line` call count
 
 Manual smoke scenarios for baseline/after-change comparisons:
