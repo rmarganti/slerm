@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use gpui::{
     App, Bounds, Element, ElementId, Entity, GlobalElementId, Hsla, IntoElement, KeyDownEvent,
     KeyUpEvent, Keystroke, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
@@ -7,6 +9,7 @@ use gpui::{
 use libghostty_vt::{key, mouse, render::CursorVisualStyle, style::RgbColor};
 
 use crate::{
+    perf::TerminalFramePerf,
     runtime::TerminalRuntimeService,
     terminal::{
         font::TerminalFontSelection,
@@ -108,6 +111,7 @@ impl Element for TerminalElement {
         window: &mut Window,
         cx: &mut App,
     ) -> Self::PrepaintState {
+        let prepaint_started_at = Instant::now();
         let theme = theme::active();
         let text_style = window.text_style();
         let font_size = text_style.font_size.to_pixels(window.rem_size());
@@ -144,6 +148,10 @@ impl Element for TerminalElement {
         let mut cells = Vec::new();
         let mut cursor = None;
         let mut background: Hsla = theme.bg.into();
+        let mut frame_perf = TerminalFramePerf {
+            shape_line_calls: 1,
+            ..TerminalFramePerf::default()
+        };
         let terminal_id = spec.id;
         let should_refresh = self.runtime.update(cx, |runtime, cx| {
             let active_live_ready = match runtime.ensure_live_terminal(&spec, dimensions) {
@@ -156,10 +164,17 @@ impl Element for TerminalElement {
             if let Err(error) = runtime.resize_live_terminals(dimensions) {
                 eprintln!("failed to resize live terminals: {error}");
             }
-            let drain_changed = runtime.drain_live_terminals();
+            let (drain_changed, drain_perf) = runtime.drain_live_terminals_with_perf();
+            frame_perf.drain = drain_perf;
             if active_live_ready && let Some(live) = runtime.live_terminal_mut(terminal_id) {
+                let snapshot_started_at = Instant::now();
                 match live.surface.render_snapshot() {
                     Ok(snapshot) => {
+                        frame_perf.snapshot_duration = snapshot_started_at.elapsed();
+                        frame_perf.rows_considered = usize::from(snapshot.rows);
+                        frame_perf.cells_considered =
+                            usize::from(snapshot.rows) * usize::from(snapshot.columns);
+                        frame_perf.render_items = snapshot.cells.len();
                         background = rgb_to_hsla(snapshot.colors.background);
                         for cell in snapshot.cells {
                             let mut foreground = cell.foreground;
@@ -180,6 +195,7 @@ impl Element for TerminalElement {
                             let line = if cell.text.is_empty() {
                                 None
                             } else {
+                                frame_perf.shape_line_calls += 1;
                                 Some(window.text_system().shape_line(
                                     cell.text.clone().into(),
                                     font_size,
@@ -234,6 +250,8 @@ impl Element for TerminalElement {
         if should_refresh {
             window.refresh();
         }
+        frame_perf.prepaint_duration = prepaint_started_at.elapsed();
+        frame_perf.log_if_enabled();
 
         PrepaintState {
             background_quad: fill(bounds, background),

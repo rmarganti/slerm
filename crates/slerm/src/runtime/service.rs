@@ -7,6 +7,7 @@ use std::{
 use anyhow::bail;
 
 use crate::{
+    perf::TerminalDrainPerf,
     project::model::Project,
     runtime::{
         LivePty, LiveTerminalSpawner, ProjectAttention, ProjectAttentionReason, Pty, PtyBackend,
@@ -219,15 +220,22 @@ impl<P: LivePty> TerminalRuntimeService<P> {
         let Some(live) = self.live.get_mut(&terminal_id) else {
             return false;
         };
-        drain_live_terminal(terminal_id, live)
+        drain_live_terminal(terminal_id, live).0
     }
 
     pub fn drain_live_terminals(&mut self) -> bool {
+        self.drain_live_terminals_with_perf().0
+    }
+
+    pub fn drain_live_terminals_with_perf(&mut self) -> (bool, TerminalDrainPerf) {
         let mut changed = false;
+        let mut perf = TerminalDrainPerf::default();
         for (terminal_id, live) in &mut self.live {
-            changed |= drain_live_terminal(*terminal_id, live);
+            let (terminal_changed, terminal_perf) = drain_live_terminal(*terminal_id, live);
+            changed |= terminal_changed;
+            perf.record_terminal(terminal_perf);
         }
-        changed
+        (changed, perf)
     }
 
     pub fn resize_live_terminal(
@@ -399,8 +407,9 @@ fn write_encoded_input<P: LivePty>(
 fn drain_live_terminal<P: LivePty>(
     terminal_id: TerminalId,
     live: &mut LiveTerminalRuntime<P>,
-) -> bool {
+) -> (bool, TerminalDrainPerf) {
     let mut changed = false;
+    let mut bytes_read = 0;
     let mut buf = [0_u8; 16 * 1024];
     let started_at = Instant::now();
     loop {
@@ -409,6 +418,7 @@ fn drain_live_terminal<P: LivePty>(
             Ok(read) => {
                 live.surface.vt_write(&buf[..read]);
                 changed = true;
+                bytes_read += read;
                 if started_at.elapsed() >= LIVE_TERMINAL_DRAIN_TIME_BUDGET {
                     break;
                 }
@@ -428,7 +438,15 @@ fn drain_live_terminal<P: LivePty>(
             eprintln!("failed to write terminal response for {terminal_id:?}: {error}");
         }
     }
-    changed
+    (
+        changed,
+        TerminalDrainPerf {
+            terminals: 1,
+            changed_terminals: usize::from(changed),
+            bytes_read,
+            duration: started_at.elapsed(),
+        },
+    )
 }
 
 fn write_all_nonblocking(pty: &impl LivePty, bytes: &[u8]) -> io::Result<()> {
