@@ -49,7 +49,7 @@ pub fn active() -> Theme {
 pub fn neverforest() -> Theme {
     Theme {
         fg: rgb(0xd3c6aa),
-        bg: rgb(0x1e2326),
+        bg: rgb(0x1d2226),
 
         terminal: TerminalTheme {
             foreground: 0xd3c6aa,
