@@ -2,6 +2,7 @@ pub mod attention;
 pub mod backend;
 pub mod extension;
 pub mod mock_backend;
+pub mod pty;
 pub mod service;
 pub mod session;
 pub mod status;
@@ -16,6 +17,7 @@ pub use extension::{
     TerminalRuntimeState,
 };
 pub use mock_backend::MockPtyBackend;
+pub use pty::{Pty, PtySize, UnixPtyBackend};
 pub use service::TerminalRuntimeService;
 pub use session::{
     ExitStatusSnapshot, SessionId, TerminalRunStatus, TerminalSession, TerminalSessionState,
