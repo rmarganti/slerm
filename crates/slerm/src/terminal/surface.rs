@@ -3,7 +3,7 @@
     reason = "phase 1 terminal surface skeleton is wired in later phases"
 )]
 
-use std::{cell::RefCell, fmt::Write as _, rc::Rc};
+use std::{borrow::Cow, cell::RefCell, fmt::Write as _, rc::Rc};
 
 use libghostty_vt::{
     RenderState, Terminal, TerminalOptions, key, mouse,
@@ -279,7 +279,10 @@ impl GhosttyTerminalSurface {
 
     pub fn vt_write(&mut self, bytes: &[u8]) {
         if !bytes.is_empty() {
-            self.terminal.vt_write(bytes);
+            let bytes = filter_unsupported_vt_modes(bytes);
+            if !bytes.is_empty() {
+                self.terminal.vt_write(&bytes);
+            }
             self.dirty = true;
         }
     }
@@ -504,6 +507,86 @@ impl GhosttyTerminalSurface {
     }
 }
 
+fn filter_unsupported_vt_modes(bytes: &[u8]) -> Cow<'_, [u8]> {
+    let mut output = None::<Vec<u8>>;
+    let mut copied_until = 0;
+    let mut index = 0;
+
+    while index < bytes.len() {
+        if bytes.get(index..index + 3) == Some(b"\x1b[?") {
+            let params_start = index + 3;
+            let mut final_index = params_start;
+            while matches!(bytes.get(final_index), Some(b'0'..=b'9' | b';')) {
+                final_index += 1;
+            }
+
+            if matches!(bytes.get(final_index), Some(b'h' | b'l'))
+                && let Some(filtered_params) =
+                    private_mode_params_without_34(&bytes[params_start..final_index])
+            {
+                let output = output.get_or_insert_with(Vec::new);
+                output.extend_from_slice(&bytes[copied_until..index]);
+                if !filtered_params.is_empty() {
+                    output.extend_from_slice(b"\x1b[?");
+                    output.extend_from_slice(&filtered_params);
+                    output.push(bytes[final_index]);
+                }
+                index = final_index + 1;
+                copied_until = index;
+                continue;
+            }
+        }
+
+        index += 1;
+    }
+
+    match output {
+        Some(mut output) => {
+            output.extend_from_slice(&bytes[copied_until..]);
+            Cow::Owned(output)
+        }
+        None => Cow::Borrowed(bytes),
+    }
+}
+
+fn private_mode_params_without_34(params: &[u8]) -> Option<Vec<u8>> {
+    let mut filtered = Vec::with_capacity(params.len());
+    let mut changed = false;
+    let mut start = 0;
+
+    for index in 0..=params.len() {
+        if index != params.len() && params[index] != b';' {
+            continue;
+        }
+
+        let param = &params[start..index];
+        if param.is_empty() || !param.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+
+        if parse_u32(param) == Some(34) {
+            changed = true;
+        } else {
+            if !filtered.is_empty() {
+                filtered.push(b';');
+            }
+            filtered.extend_from_slice(param);
+        }
+        start = index + 1;
+    }
+
+    changed.then_some(filtered)
+}
+
+fn parse_u32(bytes: &[u8]) -> Option<u32> {
+    let mut value = 0_u32;
+    for byte in bytes {
+        value = value.checked_mul(10)?;
+        value = value.checked_add(u32::from(byte - b'0'))?;
+    }
+    Some(value)
+}
+
 fn apply_theme(terminal: &mut Terminal<'static, 'static>, theme: TerminalTheme) {
     let mut sequence = String::new();
 
@@ -625,6 +708,19 @@ mod tests {
 
         assert!(styled.bold);
         assert!(styled.inverse);
+    }
+
+    #[test]
+    fn unsupported_decrlm_mode_is_filtered_from_vt_input() {
+        assert_eq!(filter_unsupported_vt_modes(b"a\x1b[?34hb").as_ref(), b"ab");
+        assert_eq!(
+            filter_unsupported_vt_modes(b"\x1b[?25;34;1004l").as_ref(),
+            b"\x1b[?25;1004l"
+        );
+        assert_eq!(
+            filter_unsupported_vt_modes(b"\x1b[?34;25h").as_ref(),
+            b"\x1b[?25h"
+        );
     }
 
     #[test]
