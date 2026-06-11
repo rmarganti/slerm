@@ -547,13 +547,15 @@ fn append_render_run(
     style: TerminalRunStyle,
 ) {
     let text = graphemes.iter().collect::<String>();
-    let can_extend = pending_run.as_ref().is_some_and(|run| {
-        run.x + run.cells == x
-            && run.foreground == style.foreground
-            && run.background == style.background
-            && run.bold == style.bold
-            && run.inverse == style.inverse
-    });
+    let can_merge_text = graphemes_are_safe_to_shape_as_run(graphemes);
+    let can_extend = can_merge_text
+        && pending_run.as_ref().is_some_and(|run| {
+            run.x + run.cells == x
+                && run.foreground == style.foreground
+                && run.background == style.background
+                && run.bold == style.bold
+                && run.inverse == style.inverse
+        });
 
     if !can_extend && let Some(run) = pending_run.take() {
         runs.push(run);
@@ -567,16 +569,31 @@ fn append_render_run(
         }
         run.cells += 1;
     } else {
-        *pending_run = Some(TerminalRenderRun {
+        let run = TerminalRenderRun {
             x,
             cells: 1,
-            text,
+            text: if text.is_empty() {
+                " ".to_string()
+            } else {
+                text
+            },
             foreground: style.foreground,
             background: style.background,
             bold: style.bold,
             inverse: style.inverse,
-        });
+        };
+        if can_merge_text {
+            *pending_run = Some(run);
+        } else {
+            runs.push(run);
+        }
     }
+}
+
+fn graphemes_are_safe_to_shape_as_run(graphemes: &[char]) -> bool {
+    graphemes
+        .iter()
+        .all(|grapheme| grapheme.is_ascii() && !grapheme.is_ascii_control())
 }
 
 fn filter_unsupported_vt_modes(bytes: &[u8]) -> Cow<'_, [u8]> {
@@ -834,8 +851,25 @@ mod tests {
         assert_eq!(runs.len(), 1);
         assert_eq!(runs[0].x, 2);
         assert_eq!(runs[0].cells, 2);
-        assert_eq!(runs[0].text, " ");
+        assert_eq!(runs[0].text, "  ");
         assert_eq!(runs[0].background, background);
+    }
+
+    #[test]
+    fn box_drawing_cells_are_not_merged_into_proportional_runs() {
+        let mut surface = surface();
+
+        surface.vt_write("────".as_bytes());
+        let snapshot = surface.render_snapshot().expect("snapshot renders");
+        let row = snapshot
+            .row_runs
+            .iter()
+            .find(|row| row.y == 0)
+            .expect("first row has runs");
+
+        assert_eq!(row.runs.len(), 4);
+        assert!(row.runs.iter().all(|run| run.cells == 1));
+        assert!(row.runs.iter().all(|run| run.text == "─"));
     }
 
     #[test]

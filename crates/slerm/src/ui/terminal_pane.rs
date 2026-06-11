@@ -189,35 +189,30 @@ impl Element for TerminalElement {
                                 }
                                 let x = bounds.left() + cell_width * f32::from(run.x);
                                 let width = cell_width * f32::from(run.cells);
-                                let background = background_color.map(|color| {
-                                    fill(
-                                        Bounds::new(point(x, y), size(width, cell_height)),
-                                        rgb_to_hsla(color),
-                                    )
-                                });
-                                let line = if run.text.is_empty() {
-                                    None
-                                } else {
-                                    frame_perf.shape_line_calls += 1;
-                                    Some(window.text_system().shape_line(
-                                        run.text.clone().into(),
-                                        font_size,
-                                        &[TextRun {
-                                            len: run.text.len(),
-                                            font: font.clone(),
-                                            color: rgb_to_hsla(foreground),
-                                            background_color: None,
-                                            underline: None,
-                                            strikethrough: None,
-                                        }],
-                                        None,
-                                    ))
-                                };
-                                runs.push(PaintedRun {
-                                    background,
-                                    line,
-                                    origin: point(x, y),
-                                });
+                                if let Some(color) = background_color {
+                                    runs.push(PaintedRun {
+                                        background: Some(fill(
+                                            Bounds::new(point(x, y), size(width, cell_height)),
+                                            rgb_to_hsla(color),
+                                        )),
+                                        line: None,
+                                        origin: point(x, y),
+                                    });
+                                }
+
+                                append_text_cells_to_prepaint(
+                                    &mut runs,
+                                    run.x,
+                                    &run.text,
+                                    font.clone(),
+                                    rgb_to_hsla(foreground),
+                                    bounds.left(),
+                                    y,
+                                    cell_width,
+                                    font_size,
+                                    window,
+                                    &mut frame_perf,
+                                );
                             }
                         }
                         if let Some(cursor_position) = snapshot.cursor {
@@ -289,6 +284,50 @@ impl Element for TerminalElement {
             prepaint.cell_height,
             window,
         );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_text_cells_to_prepaint(
+    painted_runs: &mut Vec<PaintedRun>,
+    x: u16,
+    text: &str,
+    font: gpui::Font,
+    color: Hsla,
+    bounds_left: Pixels,
+    y: Pixels,
+    cell_width: Pixels,
+    font_size: Pixels,
+    window: &mut Window,
+    frame_perf: &mut TerminalFramePerf,
+) {
+    for (cell_offset, character) in text.chars().enumerate() {
+        if character == ' ' || character.is_control() {
+            continue;
+        }
+        let text = character.to_string();
+        let origin = point(
+            bounds_left + cell_width * f32::from(x + cell_offset as u16),
+            y,
+        );
+        frame_perf.shape_line_calls += 1;
+        painted_runs.push(PaintedRun {
+            background: None,
+            line: Some(window.text_system().shape_line(
+                text.clone().into(),
+                font_size,
+                &[TextRun {
+                    len: text.len(),
+                    font: font.clone(),
+                    color,
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                }],
+                None,
+            )),
+            origin,
+        });
     }
 }
 
