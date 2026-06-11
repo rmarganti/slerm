@@ -1,6 +1,7 @@
 pub mod attention;
 pub mod backend;
 pub mod extension;
+pub mod live;
 pub mod mock_backend;
 pub mod pty;
 pub mod service;
@@ -16,9 +17,10 @@ pub use extension::{
     AgentRuntime, AgentStatus, TaskRuntime, TaskStatus, TerminalExtensionRuntime,
     TerminalRuntimeState,
 };
+pub use live::{LivePty, LiveTerminalSpawner, UnixLiveTerminalSpawner};
 pub use mock_backend::MockPtyBackend;
 pub use pty::{Pty, PtySize, UnixPtyBackend};
-pub use service::TerminalRuntimeService;
+pub use service::{LiveTerminalRuntime, TerminalRuntimeService};
 pub use session::{
     ExitStatusSnapshot, SessionId, TerminalRunStatus, TerminalSession, TerminalSessionState,
 };

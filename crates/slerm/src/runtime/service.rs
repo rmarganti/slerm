@@ -3,9 +3,9 @@ use std::{collections::BTreeMap, io, time::SystemTime};
 use crate::{
     project::model::Project,
     runtime::{
-        ProjectAttention, ProjectAttentionReason, Pty, PtyBackend, PtySize, SessionId,
-        SpawnProcessRequest, TerminalRunStatus, TerminalRuntimeState, TerminalSession,
-        TerminalSize, TerminalStatus, pty::spawn_pty,
+        LivePty, LiveTerminalSpawner, ProjectAttention, ProjectAttentionReason, Pty, PtyBackend,
+        PtySize, SessionId, SpawnProcessRequest, TerminalRunStatus, TerminalRuntimeState,
+        TerminalSession, TerminalSize, TerminalStatus, UnixLiveTerminalSpawner,
     },
     terminal::{TerminalId, TerminalSpec, surface::GhosttyTerminalSurface},
     workspace::model::WorkspaceState,
@@ -16,25 +16,35 @@ use crate::{
 /// The service is initialized from persisted specs, then updated by spawning,
 /// killing, status detection, and future task/agent runtime events.
 #[derive(Debug)]
-pub struct LiveTerminalRuntime {
-    pub pty: Pty,
+pub struct LiveTerminalRuntime<P: LivePty = Pty> {
+    pub pty: P,
     pub surface: GhosttyTerminalSurface,
 }
 
-#[derive(Debug, Default)]
-pub struct TerminalRuntimeService {
+#[derive(Debug)]
+pub struct TerminalRuntimeService<P: LivePty = Pty> {
     states: BTreeMap<TerminalId, TerminalRuntimeState>,
-    live: BTreeMap<TerminalId, LiveTerminalRuntime>,
+    live: BTreeMap<TerminalId, LiveTerminalRuntime<P>>,
     next_live_session_id: u64,
 }
 
-impl TerminalRuntimeService {
-    pub fn new() -> Self {
+impl<P: LivePty> Default for TerminalRuntimeService<P> {
+    fn default() -> Self {
+        Self {
+            states: BTreeMap::new(),
+            live: BTreeMap::new(),
+            next_live_session_id: 0,
+        }
+    }
+}
+
+impl<P: LivePty> TerminalRuntimeService<P> {
+    pub fn new_with_live_pty() -> Self {
         Self::default()
     }
 
-    pub fn from_workspace(workspace: &WorkspaceState) -> Self {
-        let mut service = Self::new();
+    pub fn from_workspace_with_live_pty(workspace: &WorkspaceState) -> Self {
+        let mut service = Self::new_with_live_pty();
         service.initialize_from_specs(
             workspace
                 .projects
@@ -142,15 +152,19 @@ impl TerminalRuntimeService {
     pub fn live_terminal_mut(
         &mut self,
         terminal_id: TerminalId,
-    ) -> Option<&mut LiveTerminalRuntime> {
+    ) -> Option<&mut LiveTerminalRuntime<P>> {
         self.live.get_mut(&terminal_id)
     }
 
-    pub fn ensure_live_terminal(
+    pub fn ensure_live_terminal_with<S>(
         &mut self,
         spec: &TerminalSpec,
         dimensions: crate::terminal::surface::TerminalDimensions,
-    ) -> anyhow::Result<&mut LiveTerminalRuntime> {
+        spawner: &mut S,
+    ) -> anyhow::Result<&mut LiveTerminalRuntime<P>>
+    where
+        S: LiveTerminalSpawner<Pty = P>,
+    {
         self.ensure_terminal(spec);
         if !self.live.contains_key(&spec.id) {
             self.next_live_session_id += 1;
@@ -159,7 +173,7 @@ impl TerminalRuntimeService {
                 terminal_id: spec.id,
                 started_at: SystemTime::now(),
             };
-            let pty = spawn_pty(
+            let pty = spawner.spawn_live_terminal(
                 spec.id,
                 session.id,
                 &spec.command,
@@ -201,7 +215,7 @@ impl TerminalRuntimeService {
             }
         }
         for response in live.surface.take_pending_pty_writes() {
-            if let Err(error) = live.pty.write_nonblocking(&response)
+            if let Err(error) = write_all_nonblocking(&live.pty, &response)
                 && error.kind() != io::ErrorKind::WouldBlock
             {
                 eprintln!("failed to write terminal response for {terminal_id:?}: {error}");
@@ -249,4 +263,40 @@ impl TerminalRuntimeService {
 
         attention
     }
+}
+
+impl TerminalRuntimeService<Pty> {
+    pub fn new() -> Self {
+        Self::new_with_live_pty()
+    }
+
+    pub fn from_workspace(workspace: &WorkspaceState) -> Self {
+        Self::from_workspace_with_live_pty(workspace)
+    }
+
+    pub fn ensure_live_terminal(
+        &mut self,
+        spec: &TerminalSpec,
+        dimensions: crate::terminal::surface::TerminalDimensions,
+    ) -> anyhow::Result<&mut LiveTerminalRuntime<Pty>> {
+        self.ensure_live_terminal_with(spec, dimensions, &mut UnixLiveTerminalSpawner)
+    }
+}
+
+fn write_all_nonblocking(pty: &impl LivePty, bytes: &[u8]) -> io::Result<()> {
+    let mut offset = 0;
+    while offset < bytes.len() {
+        match pty.write_nonblocking(&bytes[offset..]) {
+            Ok(0) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WriteZero,
+                    "live PTY write made no progress",
+                ));
+            }
+            Ok(written) => offset += written,
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
 }

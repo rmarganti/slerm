@@ -119,7 +119,7 @@ pub struct TerminalRenderCursor {
 
 #[derive(Debug)]
 pub struct GhosttyTerminalSurface {
-    terminal: Terminal<'static, 'static>,
+    terminal: Box<Terminal<'static, 'static>>,
     render_state: RenderState<'static>,
     row_it: RowIterator<'static>,
     cell_it: CellIterator<'static>,
@@ -134,11 +134,11 @@ impl GhosttyTerminalSurface {
         let dimensions = Rc::new(RefCell::new(dimensions));
         let pending_pty_writes = Rc::new(RefCell::new(Vec::new()));
 
-        let mut terminal = Terminal::new(TerminalOptions {
+        let mut terminal = Box::new(Terminal::new(TerminalOptions {
             cols: dimensions.borrow().columns,
             rows: dimensions.borrow().rows,
             max_scrollback: 1000,
-        })?;
+        })?);
         apply_theme(&mut terminal, theme::active().terminal);
         // TerminalOptions carries cell dimensions only; resize also informs
         // libghostty of per-cell pixel dimensions used for size reports and
@@ -150,6 +150,9 @@ impl GhosttyTerminalSurface {
             dimensions.borrow().cell_height_px,
         )?;
 
+        // libghostty stores callback userdata as a pointer to the Terminal's
+        // internal vtable. Keep the Terminal boxed before registering effects
+        // so moving GhosttyTerminalSurface does not invalidate that pointer.
         register_effects(
             &mut terminal,
             dimensions.clone(),
@@ -341,5 +344,92 @@ fn device_attributes() -> DeviceAttributes {
             rom_cartridge: 0,
         },
         tertiary: TertiaryDeviceAttributes::default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn surface() -> GhosttyTerminalSurface {
+        GhosttyTerminalSurface::new(TerminalDimensions::new(20, 5, 8, 16))
+            .expect("surface initializes")
+    }
+
+    fn rendered_text(snapshot: &TerminalRenderSnapshot) -> String {
+        let mut text = String::new();
+        for cell in &snapshot.cells {
+            text.push_str(&cell.text);
+        }
+        text
+    }
+
+    #[test]
+    fn vt_write_plain_text_appears_in_render_snapshot() {
+        let mut surface = surface();
+
+        surface.vt_write(b"hello");
+        let snapshot = surface.render_snapshot().expect("snapshot renders");
+
+        assert!(rendered_text(&snapshot).contains("hello"));
+        assert_eq!(snapshot.columns, 20);
+        assert_eq!(snapshot.rows, 5);
+    }
+
+    #[test]
+    fn vt_write_marks_dirty_and_render_snapshot_clears_it() {
+        let mut surface = surface();
+        surface.render_snapshot().expect("initial render succeeds");
+        assert!(!surface.is_dirty());
+
+        surface.vt_write(b"x");
+        assert!(surface.is_dirty());
+
+        surface.render_snapshot().expect("render succeeds");
+        assert!(!surface.is_dirty());
+    }
+
+    #[test]
+    fn resize_updates_dimensions_and_marks_dirty() {
+        let mut surface = surface();
+        surface.render_snapshot().expect("initial render succeeds");
+
+        let dimensions = TerminalDimensions::new(10, 4, 9, 18);
+        surface.resize(dimensions).expect("resize succeeds");
+
+        assert_eq!(surface.dimensions(), dimensions);
+        assert!(surface.is_dirty());
+        let snapshot = surface.render_snapshot().expect("snapshot renders");
+        assert_eq!(snapshot.columns, 10);
+        assert_eq!(snapshot.rows, 4);
+    }
+
+    #[test]
+    fn ansi_styles_are_exposed_on_cells() {
+        let mut surface = surface();
+
+        surface.vt_write(b"\x1b[1;7mb\x1b[0m");
+        let snapshot = surface.render_snapshot().expect("snapshot renders");
+        let styled = snapshot
+            .cells
+            .iter()
+            .find(|cell| cell.text == "b")
+            .expect("styled cell is present");
+
+        assert!(styled.bold);
+        assert!(styled.inverse);
+    }
+
+    #[test]
+    fn device_attribute_query_buffers_pty_response() {
+        let mut surface = surface();
+
+        surface.vt_write(b"\x1b[c");
+        let responses = surface.take_pending_pty_writes();
+
+        assert!(
+            responses.iter().any(|response| !response.is_empty()),
+            "expected libghostty to generate a device-attribute response"
+        );
     }
 }

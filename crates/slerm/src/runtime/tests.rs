@@ -1,4 +1,10 @@
-use std::path::PathBuf;
+use std::{
+    cell::RefCell,
+    collections::VecDeque,
+    io,
+    path::{Path, PathBuf},
+    rc::Rc,
+};
 
 use super::*;
 use crate::{
@@ -6,6 +12,7 @@ use crate::{
     terminal::{
         ProcessSpec, TerminalId, TerminalSpec,
         extension::{AgentKind, AgentSpec, TerminalExtensionSpec},
+        surface::TerminalDimensions,
     },
     workspace::model::WorkspaceState,
 };
@@ -19,6 +26,92 @@ fn terminal(extension: TerminalExtensionSpec) -> TerminalRuntimeState {
         "/tmp",
         ProcessSpec::shell(),
     ))
+}
+
+#[derive(Clone, Debug, Default)]
+struct MockLivePtyInner {
+    reads: VecDeque<Vec<u8>>,
+    writes: Vec<Vec<u8>>,
+    resizes: Vec<PtySize>,
+    terminated: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+struct MockLivePty {
+    inner: Rc<RefCell<MockLivePtyInner>>,
+}
+
+impl MockLivePty {
+    fn push_read(&self, bytes: impl Into<Vec<u8>>) {
+        self.inner.borrow_mut().reads.push_back(bytes.into());
+    }
+
+    fn written(&self) -> Vec<Vec<u8>> {
+        self.inner.borrow().writes.clone()
+    }
+
+    fn resizes(&self) -> Vec<PtySize> {
+        self.inner.borrow().resizes.clone()
+    }
+
+    fn terminated(&self) -> bool {
+        self.inner.borrow().terminated
+    }
+}
+
+impl LivePty for MockLivePty {
+    fn read_available(&self, buf: &mut [u8]) -> io::Result<usize> {
+        let mut inner = self.inner.borrow_mut();
+        let Some(mut bytes) = inner.reads.pop_front() else {
+            return Err(io::ErrorKind::WouldBlock.into());
+        };
+        let len = bytes.len().min(buf.len());
+        buf[..len].copy_from_slice(&bytes[..len]);
+        if len < bytes.len() {
+            bytes.drain(..len);
+            inner.reads.push_front(bytes);
+        }
+        Ok(len)
+    }
+
+    fn write_nonblocking(&self, bytes: &[u8]) -> io::Result<usize> {
+        self.inner.borrow_mut().writes.push(bytes.to_vec());
+        Ok(bytes.len())
+    }
+
+    fn resize(&self, size: PtySize) -> io::Result<()> {
+        self.inner.borrow_mut().resizes.push(size);
+        Ok(())
+    }
+
+    fn terminate(&self) -> io::Result<()> {
+        self.inner.borrow_mut().terminated = true;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default)]
+struct MockLiveSpawner {
+    spawned: Vec<(TerminalId, SessionId, PtySize)>,
+    handles: Vec<MockLivePty>,
+}
+
+impl LiveTerminalSpawner for MockLiveSpawner {
+    type Pty = MockLivePty;
+
+    fn spawn_live_terminal(
+        &mut self,
+        terminal_id: TerminalId,
+        session_id: SessionId,
+        _process: &ProcessSpec,
+        _cwd: &Path,
+        size: PtySize,
+    ) -> anyhow::Result<Self::Pty> {
+        let pty = MockLivePty::default();
+        self.spawned.push((terminal_id, session_id, size));
+        self.handles.push(pty.clone());
+        Ok(pty)
+    }
 }
 
 #[test]
@@ -239,4 +332,152 @@ fn project_attention_aggregates_highest_severity() {
             .iter()
             .any(|reason| reason.reason == AttentionReason::TaskFailed)
     );
+}
+
+#[test]
+fn live_terminal_spawner_seam_starts_terminal_once() {
+    let spec = TerminalSpec::new(
+        11,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "terminal",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let dimensions = TerminalDimensions::new(80, 24, 8, 16);
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+
+    service
+        .ensure_live_terminal_with(&spec, dimensions, &mut spawner)
+        .expect("first live spawn succeeds");
+    service
+        .ensure_live_terminal_with(&spec, dimensions, &mut spawner)
+        .expect("second ensure reuses live runtime");
+
+    assert_eq!(spawner.spawned.len(), 1);
+    assert_eq!(spawner.spawned[0].0, spec.id);
+    assert_eq!(spawner.spawned[0].2, PtySize::from_dimensions(dimensions));
+    let state = service.terminal(spec.id).expect("runtime state exists");
+    assert_eq!(state.session.status, TerminalRunStatus::Running);
+}
+
+#[test]
+fn live_terminal_drain_feeds_surface_without_real_pty() {
+    let spec = TerminalSpec::new(
+        12,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "terminal",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&spec, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("live spawn succeeds");
+    spawner.handles[0].push_read(b"hidden-output".to_vec());
+
+    assert!(service.drain_live_terminal(spec.id));
+    let snapshot = service
+        .live_terminal_mut(spec.id)
+        .expect("live terminal exists")
+        .surface
+        .render_snapshot()
+        .expect("snapshot renders");
+    let text = snapshot
+        .cells
+        .iter()
+        .map(|cell| cell.text.as_str())
+        .collect::<String>();
+
+    assert!(text.contains("hidden-output"));
+}
+
+#[test]
+fn live_terminal_drain_writes_libghostty_responses_back_to_pty() {
+    let spec = TerminalSpec::new(
+        13,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "terminal",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&spec, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("live spawn succeeds");
+    spawner.handles[0].push_read(b"\x1b[c".to_vec());
+
+    service.drain_live_terminal(spec.id);
+
+    assert!(
+        spawner.handles[0]
+            .written()
+            .iter()
+            .any(|response| !response.is_empty()),
+        "device-attribute response should be written to PTY"
+    );
+}
+
+#[test]
+fn live_terminal_resize_updates_surface_and_pty() {
+    let spec = TerminalSpec::new(
+        14,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "terminal",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&spec, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("live spawn succeeds");
+
+    let dimensions = TerminalDimensions::new(100, 30, 9, 18);
+    service
+        .resize_live_terminal(spec.id, dimensions)
+        .expect("resize succeeds");
+
+    assert_eq!(
+        service
+            .live_terminal_mut(spec.id)
+            .expect("live terminal exists")
+            .surface
+            .dimensions(),
+        dimensions
+    );
+    assert_eq!(
+        spawner.handles[0].resizes(),
+        vec![PtySize::from_dimensions(dimensions)]
+    );
+}
+
+#[test]
+fn remove_terminal_terminates_live_pty() {
+    let spec = TerminalSpec::new(
+        15,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "terminal",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&spec, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("live spawn succeeds");
+
+    let removed = service.remove_terminal(spec.id);
+
+    assert!(removed.is_some());
+    assert!(spawner.handles[0].terminated());
+    assert!(service.terminal(spec.id).is_none());
+    assert!(service.live_terminal_mut(spec.id).is_none());
 }
