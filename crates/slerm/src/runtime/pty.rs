@@ -249,7 +249,7 @@ impl PtyBackend for UnixPtyBackend {
     }
 }
 
-fn spawn_pty(
+pub fn spawn_pty(
     terminal_id: TerminalId,
     session_id: SessionId,
     process: &ProcessSpec,

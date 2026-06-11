@@ -1,6 +1,8 @@
+use std::time::Duration;
+
 use gpui::{
-    Context, Entity, FocusHandle, Focusable, IntoElement, PathPromptOptions, Render, Window, div,
-    prelude::*,
+    AsyncApp, Context, Entity, FocusHandle, Focusable, IntoElement, PathPromptOptions, Render,
+    Task, Timer, WeakEntity, Window, div, prelude::*,
 };
 
 use crate::{
@@ -35,17 +37,28 @@ pub struct SlermApp {
     runtime: Entity<TerminalRuntimeService>,
     focus_handle: FocusHandle,
     active_modal: Option<ActiveModal>,
+    _repaint_task: Task<()>,
 }
 
 impl SlermApp {
     pub fn new(workspace: WorkspaceState, cx: &mut Context<Self>) -> Self {
         let runtime = TerminalRuntimeService::from_workspace(&workspace);
 
+        let repaint_task = cx.spawn(async move |app: WeakEntity<SlermApp>, cx: &mut AsyncApp| {
+            loop {
+                Timer::after(Duration::from_millis(16)).await;
+                if app.update(cx, |_app, cx| cx.notify()).is_err() {
+                    break;
+                }
+            }
+        });
+
         Self {
             workspace: cx.new(|_| workspace),
             runtime: cx.new(|_| runtime),
             focus_handle: cx.focus_handle(),
             active_modal: None,
+            _repaint_task: repaint_task,
         }
     }
 }
@@ -409,7 +422,10 @@ impl Render for SlermApp {
                     .flex_1()
                     .overflow_hidden()
                     .child(Sidebar::new(self.workspace.clone(), self.runtime.clone()))
-                    .child(TerminalPane::new(self.workspace.clone())),
+                    .child(TerminalPane::new(
+                        self.workspace.clone(),
+                        self.runtime.clone(),
+                    )),
             )
             .child(ProjectBar::new(
                 self.workspace.clone(),

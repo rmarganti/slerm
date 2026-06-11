@@ -1,12 +1,13 @@
-use std::{collections::BTreeMap, time::SystemTime};
+use std::{collections::BTreeMap, io, time::SystemTime};
 
 use crate::{
     project::model::Project,
     runtime::{
-        ProjectAttention, ProjectAttentionReason, PtyBackend, SpawnProcessRequest,
-        TerminalRunStatus, TerminalRuntimeState, TerminalSession, TerminalSize, TerminalStatus,
+        ProjectAttention, ProjectAttentionReason, Pty, PtyBackend, PtySize, SessionId,
+        SpawnProcessRequest, TerminalRunStatus, TerminalRuntimeState, TerminalSession,
+        TerminalSize, TerminalStatus, pty::spawn_pty,
     },
-    terminal::{TerminalId, TerminalSpec},
+    terminal::{TerminalId, TerminalSpec, surface::GhosttyTerminalSurface},
     workspace::model::WorkspaceState,
 };
 
@@ -14,9 +15,17 @@ use crate::{
 ///
 /// The service is initialized from persisted specs, then updated by spawning,
 /// killing, status detection, and future task/agent runtime events.
-#[derive(Clone, Debug, Default)]
+#[derive(Debug)]
+pub struct LiveTerminalRuntime {
+    pub pty: Pty,
+    pub surface: GhosttyTerminalSurface,
+}
+
+#[derive(Debug, Default)]
 pub struct TerminalRuntimeService {
     states: BTreeMap<TerminalId, TerminalRuntimeState>,
+    live: BTreeMap<TerminalId, LiveTerminalRuntime>,
+    next_live_session_id: u64,
 }
 
 impl TerminalRuntimeService {
@@ -106,6 +115,11 @@ impl TerminalRuntimeService {
     }
 
     pub fn remove_terminal(&mut self, terminal_id: TerminalId) -> Option<TerminalRuntimeState> {
+        if let Some(live) = self.live.remove(&terminal_id)
+            && let Err(error) = live.pty.terminate()
+        {
+            eprintln!("failed to terminate terminal {terminal_id:?}: {error}");
+        }
         self.states.remove(&terminal_id)
     }
 
@@ -123,6 +137,91 @@ impl TerminalRuntimeService {
 
     pub fn states_mut(&mut self) -> &mut BTreeMap<TerminalId, TerminalRuntimeState> {
         &mut self.states
+    }
+
+    pub fn live_terminal_mut(
+        &mut self,
+        terminal_id: TerminalId,
+    ) -> Option<&mut LiveTerminalRuntime> {
+        self.live.get_mut(&terminal_id)
+    }
+
+    pub fn ensure_live_terminal(
+        &mut self,
+        spec: &TerminalSpec,
+        dimensions: crate::terminal::surface::TerminalDimensions,
+    ) -> anyhow::Result<&mut LiveTerminalRuntime> {
+        self.ensure_terminal(spec);
+        if !self.live.contains_key(&spec.id) {
+            self.next_live_session_id += 1;
+            let session = TerminalSession {
+                id: SessionId(self.next_live_session_id),
+                terminal_id: spec.id,
+                started_at: SystemTime::now(),
+            };
+            let pty = spawn_pty(
+                spec.id,
+                session.id,
+                &spec.command,
+                &spec.cwd,
+                PtySize::from_dimensions(dimensions),
+            )?;
+            let surface = GhosttyTerminalSurface::new(dimensions)?;
+            self.live
+                .insert(spec.id, LiveTerminalRuntime { pty, surface });
+            if let Some(state) = self.terminal_mut(spec.id) {
+                state.session.session = Some(session);
+                state.session.status = TerminalRunStatus::Running;
+                state.session.exit_status = None;
+                state.session.updated_at = SystemTime::now();
+            }
+        }
+        Ok(self.live.get_mut(&spec.id).expect("live terminal inserted"))
+    }
+
+    pub fn drain_live_terminal(&mut self, terminal_id: TerminalId) -> bool {
+        let Some(live) = self.live.get_mut(&terminal_id) else {
+            return false;
+        };
+        let mut changed = false;
+        let mut buf = [0_u8; 16 * 1024];
+        loop {
+            match live.pty.read_available(&mut buf) {
+                Ok(0) => break,
+                Ok(read) => {
+                    live.surface.vt_write(&buf[..read]);
+                    changed = true;
+                }
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
+                Err(err) if err.raw_os_error() == Some(libc::EIO) => break,
+                Err(error) => {
+                    eprintln!("failed to read PTY for terminal {terminal_id:?}: {error}");
+                    break;
+                }
+            }
+        }
+        for response in live.surface.take_pending_pty_writes() {
+            if let Err(error) = live.pty.write_nonblocking(&response)
+                && error.kind() != io::ErrorKind::WouldBlock
+            {
+                eprintln!("failed to write terminal response for {terminal_id:?}: {error}");
+            }
+        }
+        changed
+    }
+
+    pub fn resize_live_terminal(
+        &mut self,
+        terminal_id: TerminalId,
+        dimensions: crate::terminal::surface::TerminalDimensions,
+    ) -> anyhow::Result<()> {
+        if let Some(live) = self.live.get_mut(&terminal_id)
+            && live.surface.dimensions() != dimensions
+        {
+            live.surface.resize(dimensions)?;
+            live.pty.resize(PtySize::from_dimensions(dimensions))?;
+        }
+        Ok(())
     }
 
     pub fn terminal_status(&self, terminal_id: TerminalId) -> Option<TerminalStatus> {
