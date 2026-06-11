@@ -12,10 +12,21 @@ use crate::{
     terminal::{
         ProcessSpec, TerminalId, TerminalSpec,
         extension::{AgentKind, AgentSpec, TerminalExtensionSpec},
-        surface::{TerminalDimensions, TerminalKeyAction, TerminalKeyInput},
+        surface::{
+            TerminalDimensions, TerminalKeyAction, TerminalKeyInput, TerminalRenderSnapshot,
+        },
     },
     workspace::model::WorkspaceState,
 };
+
+fn snapshot_text(snapshot: &TerminalRenderSnapshot) -> String {
+    snapshot
+        .row_runs
+        .iter()
+        .flat_map(|row| &row.runs)
+        .map(|run| run.text.as_str())
+        .collect()
+}
 
 fn terminal(extension: TerminalExtensionSpec) -> TerminalRuntimeState {
     TerminalRuntimeState::from_spec(&TerminalSpec::new(
@@ -395,11 +406,7 @@ fn live_terminal_drain_feeds_surface_without_real_pty() {
         .surface
         .render_snapshot()
         .expect("snapshot renders");
-    let text = snapshot
-        .cells
-        .iter()
-        .map(|cell| cell.text.as_str())
-        .collect::<String>();
+    let text = snapshot_text(&snapshot);
 
     assert!(text.contains("hidden-output"));
 }
@@ -463,26 +470,20 @@ fn drain_live_terminals_feeds_hidden_and_active_surfaces() {
 
     assert!(service.drain_live_terminals());
 
-    let active_text = service
+    let active_snapshot = service
         .live_terminal_mut(active.id)
         .expect("active live terminal exists")
         .surface
         .render_snapshot()
-        .expect("active snapshot renders")
-        .cells
-        .iter()
-        .map(|cell| cell.text.as_str())
-        .collect::<String>();
-    let hidden_text = service
+        .expect("active snapshot renders");
+    let active_text = snapshot_text(&active_snapshot);
+    let hidden_snapshot = service
         .live_terminal_mut(hidden.id)
         .expect("hidden live terminal exists")
         .surface
         .render_snapshot()
-        .expect("hidden snapshot renders")
-        .cells
-        .iter()
-        .map(|cell| cell.text.as_str())
-        .collect::<String>();
+        .expect("hidden snapshot renders");
+    let hidden_text = snapshot_text(&hidden_snapshot);
 
     assert!(active_text.contains("active-output"));
     assert!(hidden_text.contains("hidden-output"));
@@ -509,16 +510,13 @@ fn drain_live_terminal_reads_past_small_chunk_bursts() {
 
     assert!(service.drain_live_terminal(spec.id));
 
-    let rendered_text = service
+    let snapshot = service
         .live_terminal_mut(spec.id)
         .expect("live terminal exists")
         .surface
         .render_snapshot()
-        .expect("snapshot renders")
-        .cells
-        .iter()
-        .map(|cell| cell.text.as_str())
-        .collect::<String>();
+        .expect("snapshot renders");
+    let rendered_text = snapshot_text(&snapshot);
     assert_eq!(
         rendered_text.chars().filter(|char| *char == 'x').count(),
         128
@@ -559,16 +557,13 @@ fn switching_live_terminals_reuses_existing_runtime_state() {
 
     assert_eq!(spawner.spawned.len(), 2);
     assert_eq!(service.live_terminal_count(), 2);
-    let first_text = service
+    let first_snapshot = service
         .live_terminal_mut(first.id)
         .expect("first live terminal still exists")
         .surface
         .render_snapshot()
-        .expect("first snapshot renders")
-        .cells
-        .iter()
-        .map(|cell| cell.text.as_str())
-        .collect::<String>();
+        .expect("first snapshot renders");
+    let first_text = snapshot_text(&first_snapshot);
     assert!(first_text.contains("first-state"));
 }
 

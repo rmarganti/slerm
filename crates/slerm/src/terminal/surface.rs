@@ -162,7 +162,7 @@ pub struct TerminalRenderSnapshot {
     pub columns: u16,
     pub rows: u16,
     pub colors: TerminalRenderColors,
-    pub cells: Vec<TerminalRenderCell>,
+    pub row_runs: Vec<TerminalRenderRow>,
     pub cursor: Option<TerminalRenderCursor>,
 }
 
@@ -174,14 +174,28 @@ pub struct TerminalRenderColors {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TerminalRenderCell {
-    pub x: u16,
+pub struct TerminalRenderRow {
     pub y: u16,
+    pub runs: Vec<TerminalRenderRun>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalRenderRun {
+    pub x: u16,
+    pub cells: u16,
     pub text: String,
     pub foreground: RgbColor,
     pub background: Option<RgbColor>,
     pub bold: bool,
     pub inverse: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct TerminalRunStyle {
+    foreground: RgbColor,
+    background: Option<RgbColor>,
+    bold: bool,
+    inverse: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -460,30 +474,48 @@ impl GhosttyTerminalSurface {
             None
         };
 
-        let mut cells = Vec::new();
+        let mut row_runs = Vec::new();
+        let mut grapheme_buf = Vec::new();
         let mut row_index = 0;
         let mut rows_iter = self.row_it.update(&snapshot)?;
         while let Some(row) = rows_iter.next() {
+            let mut runs = Vec::new();
+            let mut pending_run = None;
             let mut col_index = 0;
             let mut cell_iter = self.cell_it.update(row)?;
             while let Some(cell) = cell_iter.next() {
-                let graphemes = cell.graphemes()?;
-                let text = graphemes.into_iter().collect::<String>();
+                let graphemes_len = cell.graphemes_len()?;
+                grapheme_buf.resize(graphemes_len, '\0');
+                if graphemes_len > 0 {
+                    cell.graphemes_buf(&mut grapheme_buf)?;
+                }
                 let style = cell.style()?;
                 let foreground = cell.fg_color()?.unwrap_or(colors.foreground);
                 let background = cell.bg_color()?;
-                if !text.is_empty() || background.is_some() {
-                    cells.push(TerminalRenderCell {
-                        x: col_index,
-                        y: row_index,
-                        text,
-                        foreground,
-                        background,
-                        bold: style.bold,
-                        inverse: style.inverse,
-                    });
+                let has_text = graphemes_len > 0;
+                if has_text || background.is_some() {
+                    append_render_run(
+                        &mut pending_run,
+                        &mut runs,
+                        col_index,
+                        &grapheme_buf,
+                        TerminalRunStyle {
+                            foreground,
+                            background,
+                            bold: style.bold,
+                            inverse: style.inverse,
+                        },
+                    );
+                } else if let Some(run) = pending_run.take() {
+                    runs.push(run);
                 }
                 col_index += 1;
+            }
+            if let Some(run) = pending_run.take() {
+                runs.push(run);
+            }
+            if !runs.is_empty() {
+                row_runs.push(TerminalRenderRow { y: row_index, runs });
             }
             row.set_dirty(false)?;
             row_index += 1;
@@ -495,7 +527,7 @@ impl GhosttyTerminalSurface {
             columns,
             rows,
             colors,
-            cells,
+            row_runs,
             cursor,
         })
     }
@@ -504,6 +536,46 @@ impl GhosttyTerminalSurface {
     /// should write these bytes back to the PTY.
     pub fn take_pending_pty_writes(&mut self) -> Vec<Vec<u8>> {
         std::mem::take(&mut *self.pending_pty_writes.borrow_mut())
+    }
+}
+
+fn append_render_run(
+    pending_run: &mut Option<TerminalRenderRun>,
+    runs: &mut Vec<TerminalRenderRun>,
+    x: u16,
+    graphemes: &[char],
+    style: TerminalRunStyle,
+) {
+    let text = graphemes.iter().collect::<String>();
+    let can_extend = pending_run.as_ref().is_some_and(|run| {
+        run.x + run.cells == x
+            && run.foreground == style.foreground
+            && run.background == style.background
+            && run.bold == style.bold
+            && run.inverse == style.inverse
+    });
+
+    if !can_extend && let Some(run) = pending_run.take() {
+        runs.push(run);
+    }
+
+    if let Some(run) = pending_run.as_mut() {
+        if text.is_empty() {
+            run.text.push(' ');
+        } else {
+            run.text.push_str(&text);
+        }
+        run.cells += 1;
+    } else {
+        *pending_run = Some(TerminalRenderRun {
+            x,
+            cells: 1,
+            text,
+            foreground: style.foreground,
+            background: style.background,
+            bold: style.bold,
+            inverse: style.inverse,
+        });
     }
 }
 
@@ -647,11 +719,16 @@ mod tests {
     }
 
     fn rendered_text(snapshot: &TerminalRenderSnapshot) -> String {
-        let mut text = String::new();
-        for cell in &snapshot.cells {
-            text.push_str(&cell.text);
-        }
-        text
+        snapshot
+            .row_runs
+            .iter()
+            .flat_map(|row| &row.runs)
+            .map(|run| run.text.as_str())
+            .collect()
+    }
+
+    fn all_runs(snapshot: &TerminalRenderSnapshot) -> Vec<&TerminalRenderRun> {
+        snapshot.row_runs.iter().flat_map(|row| &row.runs).collect()
     }
 
     #[test]
@@ -700,14 +777,65 @@ mod tests {
 
         surface.vt_write(b"\x1b[1;7mb\x1b[0m");
         let snapshot = surface.render_snapshot().expect("snapshot renders");
-        let styled = snapshot
-            .cells
-            .iter()
-            .find(|cell| cell.text == "b")
-            .expect("styled cell is present");
+        let styled = all_runs(&snapshot)
+            .into_iter()
+            .find(|run| run.text == "b")
+            .expect("styled run is present");
 
         assert!(styled.bold);
         assert!(styled.inverse);
+    }
+
+    #[test]
+    fn plain_contiguous_text_becomes_one_run() {
+        let mut surface = surface();
+
+        surface.vt_write(b"hello");
+        let snapshot = surface.render_snapshot().expect("snapshot renders");
+        let runs = all_runs(&snapshot);
+
+        assert!(runs.iter().any(|run| run.x == 0 && run.text == "hello"));
+    }
+
+    #[test]
+    fn style_boundary_splits_runs() {
+        let mut surface = surface();
+
+        surface.vt_write(b"a\x1b[31mb\x1b[0m");
+        let snapshot = surface.render_snapshot().expect("snapshot renders");
+        let row = snapshot
+            .row_runs
+            .iter()
+            .find(|row| row.y == 0)
+            .expect("first row has runs");
+
+        assert!(row.runs.iter().any(|run| run.text == "a"));
+        assert!(row.runs.iter().any(|run| run.text == "b"));
+        assert!(row.runs.len() >= 2);
+    }
+
+    #[test]
+    fn empty_background_cells_are_preserved_as_runs() {
+        let foreground = RgbColor { r: 1, g: 2, b: 3 };
+        let background = Some(RgbColor { r: 4, g: 5, b: 6 });
+        let mut pending = None;
+        let mut runs = Vec::new();
+
+        let style = TerminalRunStyle {
+            foreground,
+            background,
+            bold: false,
+            inverse: false,
+        };
+        append_render_run(&mut pending, &mut runs, 2, &[], style);
+        append_render_run(&mut pending, &mut runs, 3, &[], style);
+        runs.push(pending.take().expect("pending run exists"));
+
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].x, 2);
+        assert_eq!(runs[0].cells, 2);
+        assert_eq!(runs[0].text, " ");
+        assert_eq!(runs[0].background, background);
     }
 
     #[test]

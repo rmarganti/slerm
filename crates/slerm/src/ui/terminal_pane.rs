@@ -59,11 +59,11 @@ struct TerminalElement {
 struct PrepaintState {
     background_quad: PaintQuad,
     cell_height: Pixels,
-    cells: Vec<PaintedCell>,
+    runs: Vec<PaintedRun>,
     cursor: Option<PaintQuad>,
 }
 
-struct PaintedCell {
+struct PaintedRun {
     background: Option<PaintQuad>,
     line: Option<ShapedLine>,
     origin: gpui::Point<Pixels>,
@@ -145,7 +145,7 @@ impl Element for TerminalElement {
             return empty_prepaint(bounds, theme.bg.into(), cell_width, cell_height);
         };
 
-        let mut cells = Vec::new();
+        let mut runs = Vec::new();
         let mut cursor = None;
         let mut background: Hsla = theme.bg.into();
         let mut frame_perf = TerminalFramePerf {
@@ -174,47 +174,52 @@ impl Element for TerminalElement {
                         frame_perf.rows_considered = usize::from(snapshot.rows);
                         frame_perf.cells_considered =
                             usize::from(snapshot.rows) * usize::from(snapshot.columns);
-                        frame_perf.render_items = snapshot.cells.len();
+                        frame_perf.render_items =
+                            snapshot.row_runs.iter().map(|row| row.runs.len()).sum();
                         background = rgb_to_hsla(snapshot.colors.background);
-                        for cell in snapshot.cells {
-                            let mut foreground = cell.foreground;
-                            let mut background_color = cell.background;
-                            if cell.inverse {
-                                let original_foreground = foreground;
-                                foreground = background_color.unwrap_or(snapshot.colors.background);
-                                background_color = Some(original_foreground);
+                        for row in snapshot.row_runs {
+                            let y = bounds.top() + cell_height * f32::from(row.y);
+                            for run in row.runs {
+                                let mut foreground = run.foreground;
+                                let mut background_color = run.background;
+                                if run.inverse {
+                                    let original_foreground = foreground;
+                                    foreground =
+                                        background_color.unwrap_or(snapshot.colors.background);
+                                    background_color = Some(original_foreground);
+                                }
+                                let x = bounds.left() + cell_width * f32::from(run.x);
+                                let width = cell_width * f32::from(run.cells);
+                                let background = background_color.map(|color| {
+                                    fill(
+                                        Bounds::new(point(x, y), size(width, cell_height)),
+                                        rgb_to_hsla(color),
+                                    )
+                                });
+                                let line = if run.text.is_empty() {
+                                    None
+                                } else {
+                                    frame_perf.shape_line_calls += 1;
+                                    Some(window.text_system().shape_line(
+                                        run.text.clone().into(),
+                                        font_size,
+                                        &[TextRun {
+                                            len: run.text.len(),
+                                            font: font.clone(),
+                                            color: rgb_to_hsla(foreground),
+                                            background_color: None,
+                                            underline: None,
+                                            strikethrough: None,
+                                        }],
+                                        None,
+                                    ))
+                                };
+                                runs.push(PaintedRun {
+                                    background,
+                                    line,
+                                    origin: point(x, y),
+                                });
                             }
-                            let x = bounds.left() + cell_width * f32::from(cell.x);
-                            let y = bounds.top() + cell_height * f32::from(cell.y);
-                            let background = background_color.map(|color| {
-                                fill(
-                                    Bounds::new(point(x, y), size(cell_width, cell_height)),
-                                    rgb_to_hsla(color),
-                                )
-                            });
-                            let line = if cell.text.is_empty() {
-                                None
-                            } else {
-                                frame_perf.shape_line_calls += 1;
-                                Some(window.text_system().shape_line(
-                                    cell.text.clone().into(),
-                                    font_size,
-                                    &[TextRun {
-                                        len: cell.text.len(),
-                                        font: font.clone(),
-                                        color: rgb_to_hsla(foreground),
-                                        background_color: None,
-                                        underline: None,
-                                        strikethrough: None,
-                                    }],
-                                    None,
-                                ))
-                            };
-                            cells.push(PaintedCell {
-                                background,
-                                line,
-                                origin: point(x, y),
-                            });
                         }
                         if let Some(cursor_position) = snapshot.cursor {
                             let x = bounds.left() + cell_width * f32::from(cursor_position.x);
@@ -256,7 +261,7 @@ impl Element for TerminalElement {
         PrepaintState {
             background_quad: fill(bounds, background),
             cell_height,
-            cells,
+            runs,
             cursor,
         }
     }
@@ -272,12 +277,12 @@ impl Element for TerminalElement {
         cx: &mut App,
     ) {
         window.paint_quad(prepaint.background_quad.clone());
-        for cell in &mut prepaint.cells {
-            if let Some(background) = cell.background.take() {
+        for run in &mut prepaint.runs {
+            if let Some(background) = run.background.take() {
                 window.paint_quad(background);
             }
-            if let Some(line) = cell.line.take() {
-                line.paint(cell.origin, prepaint.cell_height, window, cx)
+            if let Some(line) = run.line.take() {
+                line.paint(run.origin, prepaint.cell_height, window, cx)
                     .ok();
             }
         }
@@ -689,7 +694,7 @@ fn empty_prepaint(
     PrepaintState {
         background_quad: fill(bounds, background),
         cell_height,
-        cells: Vec::new(),
+        runs: Vec::new(),
         cursor: None,
     }
 }
