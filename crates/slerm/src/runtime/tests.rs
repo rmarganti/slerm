@@ -33,6 +33,7 @@ struct MockLivePtyInner {
     reads: VecDeque<Vec<u8>>,
     writes: Vec<Vec<u8>>,
     resizes: Vec<PtySize>,
+    resize_errors: VecDeque<io::ErrorKind>,
     terminated: bool,
 }
 
@@ -52,6 +53,10 @@ impl MockLivePty {
 
     fn resizes(&self) -> Vec<PtySize> {
         self.inner.borrow().resizes.clone()
+    }
+
+    fn fail_next_resize(&self, kind: io::ErrorKind) {
+        self.inner.borrow_mut().resize_errors.push_back(kind);
     }
 
     fn terminated(&self) -> bool {
@@ -80,7 +85,11 @@ impl LivePty for MockLivePty {
     }
 
     fn resize(&self, size: PtySize) -> io::Result<()> {
-        self.inner.borrow_mut().resizes.push(size);
+        let mut inner = self.inner.borrow_mut();
+        if let Some(kind) = inner.resize_errors.pop_front() {
+            return Err(kind.into());
+        }
+        inner.resizes.push(size);
         Ok(())
     }
 
@@ -420,6 +429,213 @@ fn live_terminal_drain_writes_libghostty_responses_back_to_pty() {
             .iter()
             .any(|response| !response.is_empty()),
         "device-attribute response should be written to PTY"
+    );
+}
+
+#[test]
+fn drain_live_terminals_feeds_hidden_and_active_surfaces() {
+    let active = TerminalSpec::new(
+        16,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "active",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let hidden = TerminalSpec::new(
+        17,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "hidden",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&active, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("active live spawn succeeds");
+    service
+        .ensure_live_terminal_with(&hidden, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("hidden live spawn succeeds");
+    spawner.handles[0].push_read(b"active-output".to_vec());
+    spawner.handles[1].push_read(b"hidden-output".to_vec());
+
+    assert!(service.drain_live_terminals());
+
+    let active_text = service
+        .live_terminal_mut(active.id)
+        .expect("active live terminal exists")
+        .surface
+        .render_snapshot()
+        .expect("active snapshot renders")
+        .cells
+        .iter()
+        .map(|cell| cell.text.as_str())
+        .collect::<String>();
+    let hidden_text = service
+        .live_terminal_mut(hidden.id)
+        .expect("hidden live terminal exists")
+        .surface
+        .render_snapshot()
+        .expect("hidden snapshot renders")
+        .cells
+        .iter()
+        .map(|cell| cell.text.as_str())
+        .collect::<String>();
+
+    assert!(active_text.contains("active-output"));
+    assert!(hidden_text.contains("hidden-output"));
+}
+
+#[test]
+fn switching_live_terminals_reuses_existing_runtime_state() {
+    let first = TerminalSpec::new(
+        18,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "first",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let second = TerminalSpec::new(
+        19,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "second",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&first, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("first live spawn succeeds");
+    spawner.handles[0].push_read(b"first-state".to_vec());
+    service.drain_live_terminals();
+    service
+        .ensure_live_terminal_with(&second, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("second live spawn succeeds");
+    service
+        .ensure_live_terminal_with(&first, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("switching back to first reuses live terminal");
+
+    assert_eq!(spawner.spawned.len(), 2);
+    assert_eq!(service.live_terminal_count(), 2);
+    let first_text = service
+        .live_terminal_mut(first.id)
+        .expect("first live terminal still exists")
+        .surface
+        .render_snapshot()
+        .expect("first snapshot renders")
+        .cells
+        .iter()
+        .map(|cell| cell.text.as_str())
+        .collect::<String>();
+    assert!(first_text.contains("first-state"));
+}
+
+#[test]
+fn resizing_live_terminals_updates_hidden_and_active_ptys() {
+    let first = TerminalSpec::new(
+        20,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "first",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let second = TerminalSpec::new(
+        21,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "second",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&first, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("first live spawn succeeds");
+    service
+        .ensure_live_terminal_with(&second, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("second live spawn succeeds");
+
+    let dimensions = TerminalDimensions::new(100, 30, 9, 18);
+    service
+        .resize_live_terminals(dimensions)
+        .expect("resize succeeds");
+
+    assert_eq!(
+        spawner.handles[0].resizes(),
+        vec![PtySize::from_dimensions(dimensions)]
+    );
+    assert_eq!(
+        spawner.handles[1].resizes(),
+        vec![PtySize::from_dimensions(dimensions)]
+    );
+}
+
+#[test]
+fn resize_live_terminals_continues_after_error_and_retries_failed_pty() {
+    let first = TerminalSpec::new(
+        22,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "first",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let second = TerminalSpec::new(
+        23,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "second",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&first, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("first live spawn succeeds");
+    service
+        .ensure_live_terminal_with(&second, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("second live spawn succeeds");
+    spawner.handles[0].fail_next_resize(io::ErrorKind::Other);
+
+    let dimensions = TerminalDimensions::new(100, 30, 9, 18);
+    let error = service
+        .resize_live_terminals(dimensions)
+        .expect_err("first resize reports the failing terminal");
+
+    assert!(
+        error
+            .to_string()
+            .contains("failed to resize PTY for terminal TerminalId(22)")
+    );
+    assert_eq!(spawner.handles[0].resizes(), Vec::<PtySize>::new());
+    assert_eq!(
+        spawner.handles[1].resizes(),
+        vec![PtySize::from_dimensions(dimensions)]
+    );
+    assert_eq!(
+        service
+            .live_terminal_mut(first.id)
+            .expect("first live terminal exists")
+            .surface
+            .dimensions(),
+        TerminalDimensions::DEFAULT
+    );
+
+    service
+        .resize_live_terminals(dimensions)
+        .expect("failed PTY resize is retried");
+
+    assert_eq!(
+        spawner.handles[0].resizes(),
+        vec![PtySize::from_dimensions(dimensions)]
     );
 }
 

@@ -139,91 +139,85 @@ impl Element for TerminalElement {
         let mut background: Hsla = theme.bg.into();
         let terminal_id = spec.id;
         self.runtime.update(cx, |runtime, cx| {
-            match runtime.ensure_live_terminal(&spec, dimensions) {
-                Ok(_) => {
-                    if let Err(error) = runtime.resize_live_terminal(terminal_id, dimensions) {
-                        eprintln!("failed to resize terminal {terminal_id:?}: {error}");
-                    }
-                    runtime.drain_live_terminal(terminal_id);
-                    if let Some(live) = runtime.live_terminal_mut(terminal_id) {
-                        match live.surface.render_snapshot() {
-                            Ok(snapshot) => {
-                                background = rgb_to_hsla(snapshot.colors.background);
-                                for cell in snapshot.cells {
-                                    let mut foreground = cell.foreground;
-                                    let mut background_color = cell.background;
-                                    if cell.inverse {
-                                        let original_foreground = foreground;
-                                        foreground =
-                                            background_color.unwrap_or(snapshot.colors.background);
-                                        background_color = Some(original_foreground);
-                                    }
-                                    let x = bounds.left() + cell_width * f32::from(cell.x);
-                                    let y = bounds.top() + cell_height * f32::from(cell.y);
-                                    let background = background_color.map(|color| {
-                                        fill(
-                                            Bounds::new(point(x, y), size(cell_width, cell_height)),
-                                            rgb_to_hsla(color),
-                                        )
-                                    });
-                                    let line = if cell.text.is_empty() {
-                                        None
-                                    } else {
-                                        Some(window.text_system().shape_line(
-                                            cell.text.clone().into(),
-                                            font_size,
-                                            &[TextRun {
-                                                len: cell.text.len(),
-                                                font: font.clone(),
-                                                color: rgb_to_hsla(foreground),
-                                                background_color: None,
-                                                underline: None,
-                                                strikethrough: None,
-                                            }],
-                                            None,
-                                        ))
-                                    };
-                                    cells.push(PaintedCell {
-                                        background,
-                                        line,
-                                        origin: point(x, y),
-                                    });
-                                }
-                                if let Some(cursor_position) = snapshot.cursor {
-                                    let x =
-                                        bounds.left() + cell_width * f32::from(cursor_position.x);
-                                    let y =
-                                        bounds.top() + cell_height * f32::from(cursor_position.y);
-                                    let cursor_color = snapshot
-                                        .colors
-                                        .cursor
-                                        .unwrap_or(snapshot.colors.foreground);
-                                    let cursor_bounds = match cursor_position.style {
-                                        CursorVisualStyle::Bar => {
-                                            Bounds::new(point(x, y), size(px(2.0), cell_height))
-                                        }
-                                        CursorVisualStyle::Underline => Bounds::new(
-                                            point(x, y + cell_height - px(2.0)),
-                                            size(cell_width, px(2.0)),
-                                        ),
-                                        CursorVisualStyle::Block
-                                        | CursorVisualStyle::BlockHollow => {
-                                            Bounds::new(point(x, y), size(cell_width, cell_height))
-                                        }
-                                        _ => {
-                                            Bounds::new(point(x, y), size(cell_width, cell_height))
-                                        }
-                                    };
-                                    cursor = Some(fill(cursor_bounds, rgb_to_hsla(cursor_color)));
-                                }
+            let active_live_ready = match runtime.ensure_live_terminal(&spec, dimensions) {
+                Ok(_) => true,
+                Err(error) => {
+                    eprintln!("failed to start terminal {terminal_id:?}: {error}");
+                    false
+                }
+            };
+            if let Err(error) = runtime.resize_live_terminals(dimensions) {
+                eprintln!("failed to resize live terminals: {error}");
+            }
+            runtime.drain_live_terminals();
+            if active_live_ready && let Some(live) = runtime.live_terminal_mut(terminal_id) {
+                match live.surface.render_snapshot() {
+                    Ok(snapshot) => {
+                        background = rgb_to_hsla(snapshot.colors.background);
+                        for cell in snapshot.cells {
+                            let mut foreground = cell.foreground;
+                            let mut background_color = cell.background;
+                            if cell.inverse {
+                                let original_foreground = foreground;
+                                foreground = background_color.unwrap_or(snapshot.colors.background);
+                                background_color = Some(original_foreground);
                             }
-                            Err(error) => {
-                                eprintln!("failed to render terminal {terminal_id:?}: {error}")
-                            }
+                            let x = bounds.left() + cell_width * f32::from(cell.x);
+                            let y = bounds.top() + cell_height * f32::from(cell.y);
+                            let background = background_color.map(|color| {
+                                fill(
+                                    Bounds::new(point(x, y), size(cell_width, cell_height)),
+                                    rgb_to_hsla(color),
+                                )
+                            });
+                            let line = if cell.text.is_empty() {
+                                None
+                            } else {
+                                Some(window.text_system().shape_line(
+                                    cell.text.clone().into(),
+                                    font_size,
+                                    &[TextRun {
+                                        len: cell.text.len(),
+                                        font: font.clone(),
+                                        color: rgb_to_hsla(foreground),
+                                        background_color: None,
+                                        underline: None,
+                                        strikethrough: None,
+                                    }],
+                                    None,
+                                ))
+                            };
+                            cells.push(PaintedCell {
+                                background,
+                                line,
+                                origin: point(x, y),
+                            });
+                        }
+                        if let Some(cursor_position) = snapshot.cursor {
+                            let x = bounds.left() + cell_width * f32::from(cursor_position.x);
+                            let y = bounds.top() + cell_height * f32::from(cursor_position.y);
+                            let cursor_color =
+                                snapshot.colors.cursor.unwrap_or(snapshot.colors.foreground);
+                            let cursor_bounds = match cursor_position.style {
+                                CursorVisualStyle::Bar => {
+                                    Bounds::new(point(x, y), size(px(2.0), cell_height))
+                                }
+                                CursorVisualStyle::Underline => Bounds::new(
+                                    point(x, y + cell_height - px(2.0)),
+                                    size(cell_width, px(2.0)),
+                                ),
+                                CursorVisualStyle::Block | CursorVisualStyle::BlockHollow => {
+                                    Bounds::new(point(x, y), size(cell_width, cell_height))
+                                }
+                                _ => Bounds::new(point(x, y), size(cell_width, cell_height)),
+                            };
+                            cursor = Some(fill(cursor_bounds, rgb_to_hsla(cursor_color)));
                         }
                     }
+                    Err(error) => {
+                        eprintln!("failed to render terminal {terminal_id:?}: {error}")
+                    }
                 }
-                Err(error) => eprintln!("failed to start terminal {terminal_id:?}: {error}"),
             }
             cx.notify();
         });

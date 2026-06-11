@@ -1,5 +1,7 @@
 use std::{collections::BTreeMap, io, time::SystemTime};
 
+use anyhow::bail;
+
 use crate::{
     project::model::Project,
     runtime::{
@@ -156,6 +158,14 @@ impl<P: LivePty> TerminalRuntimeService<P> {
         self.live.get_mut(&terminal_id)
     }
 
+    pub fn live_terminal_ids(&self) -> impl Iterator<Item = TerminalId> + '_ {
+        self.live.keys().copied()
+    }
+
+    pub fn live_terminal_count(&self) -> usize {
+        self.live.len()
+    }
+
     pub fn ensure_live_terminal_with<S>(
         &mut self,
         spec: &TerminalSpec,
@@ -197,29 +207,13 @@ impl<P: LivePty> TerminalRuntimeService<P> {
         let Some(live) = self.live.get_mut(&terminal_id) else {
             return false;
         };
+        drain_live_terminal(terminal_id, live)
+    }
+
+    pub fn drain_live_terminals(&mut self) -> bool {
         let mut changed = false;
-        let mut buf = [0_u8; 16 * 1024];
-        loop {
-            match live.pty.read_available(&mut buf) {
-                Ok(0) => break,
-                Ok(read) => {
-                    live.surface.vt_write(&buf[..read]);
-                    changed = true;
-                }
-                Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
-                Err(err) if err.raw_os_error() == Some(libc::EIO) => break,
-                Err(error) => {
-                    eprintln!("failed to read PTY for terminal {terminal_id:?}: {error}");
-                    break;
-                }
-            }
-        }
-        for response in live.surface.take_pending_pty_writes() {
-            if let Err(error) = write_all_nonblocking(&live.pty, &response)
-                && error.kind() != io::ErrorKind::WouldBlock
-            {
-                eprintln!("failed to write terminal response for {terminal_id:?}: {error}");
-            }
+        for (terminal_id, live) in &mut self.live {
+            changed |= drain_live_terminal(*terminal_id, live);
         }
         changed
     }
@@ -232,8 +226,41 @@ impl<P: LivePty> TerminalRuntimeService<P> {
         if let Some(live) = self.live.get_mut(&terminal_id)
             && live.surface.dimensions() != dimensions
         {
+            live.pty
+                .resize(PtySize::from_dimensions(dimensions))
+                .map_err(|error| {
+                    io::Error::new(
+                        error.kind(),
+                        format!("failed to resize PTY for terminal {terminal_id:?}: {error}"),
+                    )
+                })?;
             live.surface.resize(dimensions)?;
-            live.pty.resize(PtySize::from_dimensions(dimensions))?;
+        }
+        Ok(())
+    }
+
+    pub fn resize_live_terminals(
+        &mut self,
+        dimensions: crate::terminal::surface::TerminalDimensions,
+    ) -> anyhow::Result<()> {
+        let mut errors = Vec::new();
+        for (terminal_id, live) in &mut self.live {
+            if live.surface.dimensions() != dimensions {
+                if let Err(error) = live.pty.resize(PtySize::from_dimensions(dimensions)) {
+                    errors.push(format!(
+                        "failed to resize PTY for terminal {terminal_id:?}: {error}"
+                    ));
+                    continue;
+                }
+                if let Err(error) = live.surface.resize(dimensions) {
+                    errors.push(format!(
+                        "failed to resize surface for terminal {terminal_id:?}: {error}"
+                    ));
+                }
+            }
+        }
+        if !errors.is_empty() {
+            bail!(errors.join("; "));
         }
         Ok(())
     }
@@ -281,6 +308,37 @@ impl TerminalRuntimeService<Pty> {
     ) -> anyhow::Result<&mut LiveTerminalRuntime<Pty>> {
         self.ensure_live_terminal_with(spec, dimensions, &mut UnixLiveTerminalSpawner)
     }
+}
+
+fn drain_live_terminal<P: LivePty>(
+    terminal_id: TerminalId,
+    live: &mut LiveTerminalRuntime<P>,
+) -> bool {
+    let mut changed = false;
+    let mut buf = [0_u8; 16 * 1024];
+    for _ in 0..64 {
+        match live.pty.read_available(&mut buf) {
+            Ok(0) => break,
+            Ok(read) => {
+                live.surface.vt_write(&buf[..read]);
+                changed = true;
+            }
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
+            Err(err) if err.raw_os_error() == Some(libc::EIO) => break,
+            Err(error) => {
+                eprintln!("failed to read PTY for terminal {terminal_id:?}: {error}");
+                break;
+            }
+        }
+    }
+    for response in live.surface.take_pending_pty_writes() {
+        if let Err(error) = write_all_nonblocking(&live.pty, &response)
+            && error.kind() != io::ErrorKind::WouldBlock
+        {
+            eprintln!("failed to write terminal response for {terminal_id:?}: {error}");
+        }
+    }
+    changed
 }
 
 fn write_all_nonblocking(pty: &impl LivePty, bytes: &[u8]) -> io::Result<()> {

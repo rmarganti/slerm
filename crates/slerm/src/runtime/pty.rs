@@ -1,6 +1,6 @@
 use std::{collections::BTreeMap, ffi::CString, io, os::fd::RawFd, path::Path, time::SystemTime};
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 
 use crate::{
     runtime::{PtyBackend, SessionId, SpawnProcessRequest, TerminalSession, TerminalSize},
@@ -116,14 +116,11 @@ impl Pty {
         let rc = unsafe { libc::kill(self.child_pid, libc::SIGHUP) };
         if rc == -1 {
             let err = io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::ESRCH) {
-                Ok(())
-            } else {
-                Err(err)
+            if err.raw_os_error() != Some(libc::ESRCH) {
+                return Err(err);
             }
-        } else {
-            Ok(())
         }
+        reap_child_nonblocking(self.child_pid)
     }
 
     fn set_nonblocking(&self) -> io::Result<()> {
@@ -201,7 +198,6 @@ impl PtyBackend for UnixPtyBackend {
     fn kill(&mut self, session_id: SessionId) -> anyhow::Result<()> {
         if let Some(pty) = self.sessions.remove(&session_id) {
             pty.terminate()?;
-            reap_child(pty.child_pid)?;
         }
         Ok(())
     }
@@ -317,15 +313,15 @@ fn child_exec(process: &ProcessSpec, cwd: &Path) -> ! {
     }
 }
 
-fn reap_child(pid: libc::pid_t) -> anyhow::Result<()> {
+fn reap_child_nonblocking(pid: libc::pid_t) -> io::Result<()> {
     let mut status = 0;
     loop {
-        let rc = unsafe { libc::waitpid(pid, &mut status, 0) };
-        if rc == pid {
+        let rc = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+        if rc == pid || rc == 0 {
             return Ok(());
         }
         if rc >= 0 {
-            continue;
+            return Ok(());
         }
 
         let err = io::Error::last_os_error();
@@ -335,6 +331,6 @@ fn reap_child(pid: libc::pid_t) -> anyhow::Result<()> {
         if err.raw_os_error() == Some(libc::ECHILD) {
             return Ok(());
         }
-        bail!(err);
+        return Err(err);
     }
 }
