@@ -62,6 +62,10 @@ impl MockLivePty {
         self.inner.borrow().writes.clone()
     }
 
+    fn queued_read_count(&self) -> usize {
+        self.inner.borrow().reads.len()
+    }
+
     fn resizes(&self) -> Vec<PtySize> {
         self.inner.borrow().resizes.clone()
     }
@@ -527,6 +531,144 @@ fn drain_live_terminals_records_last_tick_perf_for_ui_instrumentation() {
         perf.bytes_read,
         b"active-output".len() + b"hidden-output".len()
     );
+}
+
+#[test]
+fn prioritized_drain_consumes_active_before_budgeting_hidden_backlog() {
+    let hidden = TerminalSpec::new(
+        20,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "hidden",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let active = TerminalSpec::new(
+        21,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "active",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&hidden, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("hidden live spawn succeeds");
+    service
+        .ensure_live_terminal_with(&active, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("active live spawn succeeds");
+    spawner.handles[0].push_read(b"hidden-1".to_vec());
+    spawner.handles[0].push_read(b"hidden-2".to_vec());
+    spawner.handles[1].push_read(b"active-1".to_vec());
+    spawner.handles[1].push_read(b"active-2".to_vec());
+
+    assert!(service.drain_live_terminals_prioritized(Some(active.id)));
+
+    let active_snapshot = service
+        .live_terminal_mut(active.id)
+        .expect("active live terminal exists")
+        .surface
+        .render_snapshot()
+        .expect("active snapshot renders");
+    let hidden_snapshot = service
+        .live_terminal_mut(hidden.id)
+        .expect("hidden live terminal exists")
+        .surface
+        .render_snapshot()
+        .expect("hidden snapshot renders");
+    assert!(snapshot_text(&active_snapshot).contains("active-1active-2"));
+    assert!(snapshot_text(&hidden_snapshot).contains("hidden-1"));
+    assert_eq!(spawner.handles[0].queued_read_count(), 1);
+    assert_eq!(spawner.handles[1].queued_read_count(), 0);
+}
+
+#[test]
+fn prioritized_drain_hidden_terminals_still_progress_over_time() {
+    let active = TerminalSpec::new(
+        22,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "active",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let hidden = TerminalSpec::new(
+        23,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "hidden",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&active, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("active live spawn succeeds");
+    service
+        .ensure_live_terminal_with(&hidden, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("hidden live spawn succeeds");
+    spawner.handles[1].push_read(b"hidden-1".to_vec());
+    spawner.handles[1].push_read(b"hidden-2".to_vec());
+    spawner.handles[1].push_read(b"hidden-3".to_vec());
+
+    assert!(service.drain_live_terminals_prioritized(Some(active.id)));
+    assert!(service.drain_live_terminals_prioritized(Some(active.id)));
+    assert!(service.drain_live_terminals_prioritized(Some(active.id)));
+
+    let hidden_snapshot = service
+        .live_terminal_mut(hidden.id)
+        .expect("hidden live terminal exists")
+        .surface
+        .render_snapshot()
+        .expect("hidden snapshot renders");
+    assert!(snapshot_text(&hidden_snapshot).contains("hidden-1hidden-2hidden-3"));
+    assert_eq!(spawner.handles[1].queued_read_count(), 0);
+}
+
+#[test]
+fn prioritized_drain_noisy_hidden_terminal_cannot_starve_active_progress() {
+    let hidden = TerminalSpec::new(
+        24,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "hidden",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let active = TerminalSpec::new(
+        25,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "active",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&hidden, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("hidden live spawn succeeds");
+    service
+        .ensure_live_terminal_with(&active, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("active live spawn succeeds");
+    for index in 0..64 {
+        spawner.handles[0].push_read(format!("h{index} ").into_bytes());
+    }
+    spawner.handles[1].push_read(b"active-output".to_vec());
+
+    assert!(service.drain_live_terminals_prioritized(Some(active.id)));
+
+    let active_snapshot = service
+        .live_terminal_mut(active.id)
+        .expect("active live terminal exists")
+        .surface
+        .render_snapshot()
+        .expect("active snapshot renders");
+    assert!(snapshot_text(&active_snapshot).contains("active-output"));
+    assert_eq!(spawner.handles[0].queued_read_count(), 63);
 }
 
 #[test]

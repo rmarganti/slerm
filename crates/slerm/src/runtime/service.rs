@@ -25,6 +25,7 @@ use crate::{
 };
 
 const LIVE_TERMINAL_DRAIN_TIME_BUDGET: Duration = Duration::from_millis(4);
+const HIDDEN_TERMINAL_DRAIN_CHUNK_BUDGET: usize = 1;
 
 /// Owns live runtime state for all known terminals.
 ///
@@ -233,10 +234,39 @@ impl<P: LivePty> TerminalRuntimeService<P> {
     }
 
     pub fn drain_live_terminals_with_perf(&mut self) -> (bool, TerminalDrainPerf) {
+        self.drain_live_terminals_prioritized_with_perf(None)
+    }
+
+    pub fn drain_live_terminals_prioritized(
+        &mut self,
+        active_terminal: Option<TerminalId>,
+    ) -> bool {
+        self.drain_live_terminals_prioritized_with_perf(active_terminal)
+            .0
+    }
+
+    pub fn drain_live_terminals_prioritized_with_perf(
+        &mut self,
+        active_terminal: Option<TerminalId>,
+    ) -> (bool, TerminalDrainPerf) {
         let mut changed = false;
         let mut perf = TerminalDrainPerf::default();
+
+        if let Some(terminal_id) = active_terminal
+            && let Some(live) = self.live.get_mut(&terminal_id)
+        {
+            let (terminal_changed, terminal_perf) = drain_live_terminal(terminal_id, live);
+            changed |= terminal_changed;
+            perf.record_terminal(terminal_perf);
+        }
+
         for (terminal_id, live) in &mut self.live {
-            let (terminal_changed, terminal_perf) = drain_live_terminal(*terminal_id, live);
+            if Some(*terminal_id) == active_terminal {
+                continue;
+            }
+            let chunk_budget = active_terminal.map(|_| HIDDEN_TERMINAL_DRAIN_CHUNK_BUDGET);
+            let (terminal_changed, terminal_perf) =
+                drain_live_terminal_with_chunk_budget(*terminal_id, live, chunk_budget);
             changed |= terminal_changed;
             perf.record_terminal(terminal_perf);
         }
@@ -418,17 +448,30 @@ fn drain_live_terminal<P: LivePty>(
     terminal_id: TerminalId,
     live: &mut LiveTerminalRuntime<P>,
 ) -> (bool, TerminalDrainPerf) {
+    drain_live_terminal_with_chunk_budget(terminal_id, live, None)
+}
+
+fn drain_live_terminal_with_chunk_budget<P: LivePty>(
+    terminal_id: TerminalId,
+    live: &mut LiveTerminalRuntime<P>,
+    max_chunks: Option<usize>,
+) -> (bool, TerminalDrainPerf) {
     let mut changed = false;
     let mut bytes_read = 0;
+    let mut chunks_read = 0;
     let mut buf = [0_u8; 16 * 1024];
     let started_at = Instant::now();
     loop {
+        if max_chunks.is_some_and(|max_chunks| chunks_read >= max_chunks) {
+            break;
+        }
         match live.pty.read_available(&mut buf) {
             Ok(0) => break,
             Ok(read) => {
                 live.surface.vt_write(&buf[..read]);
                 changed = true;
                 bytes_read += read;
+                chunks_read += 1;
                 if started_at.elapsed() >= LIVE_TERMINAL_DRAIN_TIME_BUDGET {
                     break;
                 }

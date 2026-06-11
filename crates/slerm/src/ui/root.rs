@@ -47,14 +47,24 @@ impl SlermApp {
         let workspace = cx.new(|_| workspace);
         let runtime = cx.new(|_| runtime);
         let drain_runtime = runtime.clone();
+        let drain_workspace = workspace.clone();
 
         let terminal_drain_task =
             cx.spawn(async move |app: WeakEntity<SlermApp>, cx: &mut AsyncApp| {
                 loop {
                     Timer::after(Duration::from_millis(16)).await;
-                    let changed = match drain_runtime
-                        .update(cx, |runtime, _cx| runtime.drain_live_terminals())
-                    {
+                    let active_terminal = match drain_workspace.update(cx, |workspace, _cx| {
+                        workspace
+                            .active_project()
+                            .and_then(|project| project.active_terminal())
+                            .map(|terminal| terminal.id)
+                    }) {
+                        Ok(active_terminal) => active_terminal,
+                        Err(_) => break,
+                    };
+                    let changed = match drain_runtime.update(cx, |runtime, _cx| {
+                        runtime.drain_live_terminals_prioritized(active_terminal)
+                    }) {
                         Ok(changed) => changed,
                         Err(_) => break,
                     };
