@@ -489,6 +489,43 @@ fn drain_live_terminals_feeds_hidden_and_active_surfaces() {
 }
 
 #[test]
+fn drain_live_terminal_reads_past_small_chunk_bursts() {
+    let spec = TerminalSpec::new(
+        18,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "terminal",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&spec, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("live spawn succeeds");
+    for _ in 0..128 {
+        spawner.handles[0].push_read(b"x".to_vec());
+    }
+
+    assert!(service.drain_live_terminal(spec.id));
+
+    let rendered_text = service
+        .live_terminal_mut(spec.id)
+        .expect("live terminal exists")
+        .surface
+        .render_snapshot()
+        .expect("snapshot renders")
+        .cells
+        .iter()
+        .map(|cell| cell.text.as_str())
+        .collect::<String>();
+    assert_eq!(
+        rendered_text.chars().filter(|char| *char == 'x').count(),
+        128
+    );
+}
+
+#[test]
 fn switching_live_terminals_reuses_existing_runtime_state() {
     let first = TerminalSpec::new(
         18,

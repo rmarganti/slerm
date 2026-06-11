@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, io, time::SystemTime};
+use std::{
+    collections::BTreeMap,
+    io,
+    time::{Duration, Instant, SystemTime},
+};
 
 use anyhow::bail;
 
@@ -12,6 +16,8 @@ use crate::{
     terminal::{TerminalId, TerminalSpec, surface::GhosttyTerminalSurface},
     workspace::model::WorkspaceState,
 };
+
+const LIVE_TERMINAL_DRAIN_TIME_BUDGET: Duration = Duration::from_millis(4);
 
 /// Owns live runtime state for all known terminals.
 ///
@@ -316,12 +322,16 @@ fn drain_live_terminal<P: LivePty>(
 ) -> bool {
     let mut changed = false;
     let mut buf = [0_u8; 16 * 1024];
-    for _ in 0..64 {
+    let started_at = Instant::now();
+    loop {
         match live.pty.read_available(&mut buf) {
             Ok(0) => break,
             Ok(read) => {
                 live.surface.vt_write(&buf[..read]);
                 changed = true;
+                if started_at.elapsed() >= LIVE_TERMINAL_DRAIN_TIME_BUDGET {
+                    break;
+                }
             }
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
             Err(err) if err.raw_os_error() == Some(libc::EIO) => break,

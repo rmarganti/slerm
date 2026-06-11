@@ -138,7 +138,7 @@ impl Element for TerminalElement {
         let mut cursor = None;
         let mut background: Hsla = theme.bg.into();
         let terminal_id = spec.id;
-        self.runtime.update(cx, |runtime, cx| {
+        let should_refresh = self.runtime.update(cx, |runtime, cx| {
             let active_live_ready = match runtime.ensure_live_terminal(&spec, dimensions) {
                 Ok(_) => true,
                 Err(error) => {
@@ -149,7 +149,7 @@ impl Element for TerminalElement {
             if let Err(error) = runtime.resize_live_terminals(dimensions) {
                 eprintln!("failed to resize live terminals: {error}");
             }
-            runtime.drain_live_terminals();
+            let drain_changed = runtime.drain_live_terminals();
             if active_live_ready && let Some(live) = runtime.live_terminal_mut(terminal_id) {
                 match live.surface.render_snapshot() {
                     Ok(snapshot) => {
@@ -219,9 +219,14 @@ impl Element for TerminalElement {
                     }
                 }
             }
-            cx.notify();
+            if drain_changed {
+                cx.notify();
+            }
+            drain_changed
         });
-        window.refresh();
+        if should_refresh {
+            window.refresh();
+        }
 
         PrepaintState {
             background_quad: fill(bounds, background),
