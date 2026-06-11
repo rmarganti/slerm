@@ -7,7 +7,7 @@ use std::{borrow::Cow, cell::RefCell, fmt::Write as _, rc::Rc};
 
 use libghostty_vt::{
     RenderState, Terminal, TerminalOptions, key, mouse,
-    render::{CellIterator, CursorVisualStyle, Dirty, RowIterator, Snapshot},
+    render::{CellIterator, CursorVisualStyle, Dirty, RowIteration, RowIterator, Snapshot},
     style::RgbColor,
     terminal::{
         ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType,
@@ -166,6 +166,29 @@ pub struct TerminalRenderSnapshot {
     pub cursor: Option<TerminalRenderCursor>,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct TerminalRenderCache {
+    columns: u16,
+    rows: u16,
+    row_runs: Vec<Option<TerminalRenderRow>>,
+}
+
+impl TerminalRenderCache {
+    fn is_valid_for(&self, columns: u16, rows: u16) -> bool {
+        self.columns == columns && self.rows == rows && self.row_runs.len() == usize::from(rows)
+    }
+
+    fn reset(&mut self, columns: u16, rows: u16) {
+        self.columns = columns;
+        self.rows = rows;
+        self.row_runs = vec![None; usize::from(rows)];
+    }
+
+    fn row_runs(&self) -> Vec<TerminalRenderRow> {
+        self.row_runs.iter().filter_map(Clone::clone).collect()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerminalRenderColors {
     pub foreground: RgbColor,
@@ -214,6 +237,7 @@ pub struct GhosttyTerminalSurface {
     input: GhosttyInputState,
     dimensions: Rc<RefCell<TerminalDimensions>>,
     pending_pty_writes: Rc<RefCell<Vec<Vec<u8>>>>,
+    render_cache: TerminalRenderCache,
     dirty: bool,
 }
 
@@ -255,6 +279,7 @@ impl GhosttyTerminalSurface {
             input: GhosttyInputState::new()?,
             dimensions,
             pending_pty_writes,
+            render_cache: TerminalRenderCache::default(),
             dirty: true,
         })
     }
@@ -474,60 +499,41 @@ impl GhosttyTerminalSurface {
             None
         };
 
-        let mut row_runs = Vec::new();
-        let mut grapheme_buf = Vec::new();
-        let mut row_index = 0;
-        let mut rows_iter = self.row_it.update(&snapshot)?;
-        while let Some(row) = rows_iter.next() {
-            let mut runs = Vec::new();
-            let mut pending_run = None;
-            let mut col_index = 0;
-            let mut cell_iter = self.cell_it.update(row)?;
-            while let Some(cell) = cell_iter.next() {
-                let graphemes_len = cell.graphemes_len()?;
-                grapheme_buf.resize(graphemes_len, '\0');
-                if graphemes_len > 0 {
-                    cell.graphemes_buf(&mut grapheme_buf)?;
-                }
-                let style = cell.style()?;
-                let foreground = cell.fg_color()?.unwrap_or(colors.foreground);
-                let background = cell.bg_color()?;
-                let has_text = graphemes_len > 0;
-                if has_text || background.is_some() {
-                    append_render_run(
-                        &mut pending_run,
-                        &mut runs,
-                        col_index,
-                        &grapheme_buf,
-                        TerminalRunStyle {
-                            foreground,
-                            background,
-                            bold: style.bold,
-                            inverse: style.inverse,
-                        },
-                    );
-                } else if let Some(run) = pending_run.take() {
-                    runs.push(run);
-                }
-                col_index += 1;
-            }
-            if let Some(run) = pending_run.take() {
-                runs.push(run);
-            }
-            if !runs.is_empty() {
-                row_runs.push(TerminalRenderRow { y: row_index, runs });
-            }
-            row.set_dirty(false)?;
-            row_index += 1;
+        if !self.render_cache.is_valid_for(columns, rows) {
+            self.render_cache.reset(columns, rows);
+            self.dirty = true;
         }
-        snapshot.set_dirty(Dirty::Clean)?;
+
+        if self.dirty {
+            let mut grapheme_buf = Vec::new();
+            let mut row_index = 0;
+            let mut rows_iter = self.row_it.update(&snapshot)?;
+            while let Some(row) = rows_iter.next() {
+                let row_dirty =
+                    row.dirty()? || self.render_cache.row_runs[usize::from(row_index)].is_none();
+                if row_dirty {
+                    self.render_cache.row_runs[usize::from(row_index)] = render_row_runs(
+                        row,
+                        &mut self.cell_it,
+                        &mut grapheme_buf,
+                        row_index,
+                        colors.foreground,
+                    )?;
+                }
+                if row_dirty {
+                    row.set_dirty(false)?;
+                }
+                row_index += 1;
+            }
+            snapshot.set_dirty(Dirty::Clean)?;
+        }
         self.dirty = false;
 
         Ok(TerminalRenderSnapshot {
             columns,
             rows,
             colors,
-            row_runs,
+            row_runs: self.render_cache.row_runs(),
             cursor,
         })
     }
@@ -537,6 +543,52 @@ impl GhosttyTerminalSurface {
     pub fn take_pending_pty_writes(&mut self) -> Vec<Vec<u8>> {
         std::mem::take(&mut *self.pending_pty_writes.borrow_mut())
     }
+}
+
+fn render_row_runs(
+    row: &RowIteration<'static, '_>,
+    cell_it: &mut CellIterator<'static>,
+    grapheme_buf: &mut Vec<char>,
+    row_index: u16,
+    default_foreground: RgbColor,
+) -> libghostty_vt::error::Result<Option<TerminalRenderRow>> {
+    let mut runs = Vec::new();
+    let mut pending_run = None;
+    let mut col_index = 0;
+    let mut cell_iter = cell_it.update(row)?;
+    while let Some(cell) = cell_iter.next() {
+        let graphemes_len = cell.graphemes_len()?;
+        grapheme_buf.resize(graphemes_len, '\0');
+        if graphemes_len > 0 {
+            cell.graphemes_buf(grapheme_buf)?;
+        }
+        let style = cell.style()?;
+        let foreground = cell.fg_color()?.unwrap_or(default_foreground);
+        let background = cell.bg_color()?;
+        let has_text = graphemes_len > 0;
+        if has_text || background.is_some() {
+            append_render_run(
+                &mut pending_run,
+                &mut runs,
+                col_index,
+                grapheme_buf,
+                TerminalRunStyle {
+                    foreground,
+                    background,
+                    bold: style.bold,
+                    inverse: style.inverse,
+                },
+            );
+        } else if let Some(run) = pending_run.take() {
+            runs.push(run);
+        }
+        col_index += 1;
+    }
+    if let Some(run) = pending_run.take() {
+        runs.push(run);
+    }
+
+    Ok((!runs.is_empty()).then_some(TerminalRenderRow { y: row_index, runs }))
 }
 
 fn append_render_run(
@@ -771,6 +823,29 @@ mod tests {
 
         surface.render_snapshot().expect("render succeeds");
         assert!(!surface.is_dirty());
+    }
+
+    #[test]
+    fn render_snapshot_reuses_cached_rows_until_dirty() {
+        let mut surface = surface();
+        surface.vt_write(b"first\r\nsecond");
+        surface.render_snapshot().expect("initial render succeeds");
+        let cached_first_row = surface.render_cache.row_runs[0].clone();
+
+        surface.render_snapshot().expect("clean render succeeds");
+        assert_eq!(surface.render_cache.row_runs[0], cached_first_row);
+
+        surface.vt_write(b"\x1b[2;1Hchanged");
+        let snapshot = surface.render_snapshot().expect("dirty render succeeds");
+
+        assert_eq!(surface.render_cache.row_runs[0], cached_first_row);
+        assert!(
+            snapshot
+                .row_runs
+                .iter()
+                .flat_map(|row| &row.runs)
+                .any(|run| run.text.contains("changed"))
+        );
     }
 
     #[test]

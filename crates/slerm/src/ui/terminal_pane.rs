@@ -301,34 +301,32 @@ fn append_text_cells_to_prepaint(
     window: &mut Window,
     frame_perf: &mut TerminalFramePerf,
 ) {
-    for (cell_offset, character) in text.chars().enumerate() {
-        if character == ' ' || character.is_control() {
-            continue;
-        }
-        let text = character.to_string();
-        let origin = point(
-            bounds_left + cell_width * f32::from(x + cell_offset as u16),
-            y,
-        );
-        frame_perf.shape_line_calls += 1;
-        painted_runs.push(PaintedRun {
-            background: None,
-            line: Some(window.text_system().shape_line(
-                text.clone().into(),
-                font_size,
-                &[TextRun {
-                    len: text.len(),
-                    font: font.clone(),
-                    color,
-                    background_color: None,
-                    underline: None,
-                    strikethrough: None,
-                }],
-                None,
-            )),
-            origin,
-        });
+    if text
+        .chars()
+        .all(|character| character == ' ' || character.is_control())
+    {
+        return;
     }
+
+    let origin = point(bounds_left + cell_width * f32::from(x), y);
+    frame_perf.shape_line_calls += 1;
+    painted_runs.push(PaintedRun {
+        background: None,
+        line: Some(window.text_system().shape_line(
+            text.to_string().into(),
+            font_size,
+            &[TextRun {
+                len: text.len(),
+                font,
+                color,
+                background_color: None,
+                underline: None,
+                strikethrough: None,
+            }],
+            None,
+        )),
+        origin,
+    });
 }
 
 fn register_terminal_input_handlers(
