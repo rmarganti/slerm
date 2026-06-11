@@ -41,6 +41,7 @@ pub struct TerminalRuntimeService<P: LivePty = Pty> {
     states: BTreeMap<TerminalId, TerminalRuntimeState>,
     live: BTreeMap<TerminalId, LiveTerminalRuntime<P>>,
     next_live_session_id: u64,
+    last_drain_perf: TerminalDrainPerf,
 }
 
 impl<P: LivePty> Default for TerminalRuntimeService<P> {
@@ -49,6 +50,7 @@ impl<P: LivePty> Default for TerminalRuntimeService<P> {
             states: BTreeMap::new(),
             live: BTreeMap::new(),
             next_live_session_id: 0,
+            last_drain_perf: TerminalDrainPerf::default(),
         }
     }
 }
@@ -218,9 +220,12 @@ impl<P: LivePty> TerminalRuntimeService<P> {
 
     pub fn drain_live_terminal(&mut self, terminal_id: TerminalId) -> bool {
         let Some(live) = self.live.get_mut(&terminal_id) else {
+            self.last_drain_perf = TerminalDrainPerf::default();
             return false;
         };
-        drain_live_terminal(terminal_id, live).0
+        let (changed, perf) = drain_live_terminal(terminal_id, live);
+        self.last_drain_perf = perf;
+        changed
     }
 
     pub fn drain_live_terminals(&mut self) -> bool {
@@ -235,7 +240,12 @@ impl<P: LivePty> TerminalRuntimeService<P> {
             changed |= terminal_changed;
             perf.record_terminal(terminal_perf);
         }
+        self.last_drain_perf = perf;
         (changed, perf)
+    }
+
+    pub fn last_drain_perf(&self) -> TerminalDrainPerf {
+        self.last_drain_perf
     }
 
     pub fn resize_live_terminal(

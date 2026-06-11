@@ -38,28 +38,38 @@ pub struct SlermApp {
     runtime: Entity<TerminalRuntimeService>,
     focus_handle: FocusHandle,
     active_modal: Option<ActiveModal>,
-    _repaint_task: Task<()>,
+    _terminal_drain_task: Task<()>,
 }
 
 impl SlermApp {
     pub fn new(workspace: WorkspaceState, cx: &mut Context<Self>) -> Self {
         let runtime = TerminalRuntimeService::from_workspace(&workspace);
+        let workspace = cx.new(|_| workspace);
+        let runtime = cx.new(|_| runtime);
+        let drain_runtime = runtime.clone();
 
-        let repaint_task = cx.spawn(async move |app: WeakEntity<SlermApp>, cx: &mut AsyncApp| {
-            loop {
-                Timer::after(Duration::from_millis(16)).await;
-                if app.update(cx, |_app, cx| cx.notify()).is_err() {
-                    break;
+        let terminal_drain_task =
+            cx.spawn(async move |app: WeakEntity<SlermApp>, cx: &mut AsyncApp| {
+                loop {
+                    Timer::after(Duration::from_millis(16)).await;
+                    let changed = match drain_runtime
+                        .update(cx, |runtime, _cx| runtime.drain_live_terminals())
+                    {
+                        Ok(changed) => changed,
+                        Err(_) => break,
+                    };
+                    if changed && app.update(cx, |_app, cx| cx.notify()).is_err() {
+                        break;
+                    }
                 }
-            }
-        });
+            });
 
         Self {
-            workspace: cx.new(|_| workspace),
-            runtime: cx.new(|_| runtime),
+            workspace,
+            runtime,
             focus_handle: cx.focus_handle(),
             active_modal: None,
-            _repaint_task: repaint_task,
+            _terminal_drain_task: terminal_drain_task,
         }
     }
 }

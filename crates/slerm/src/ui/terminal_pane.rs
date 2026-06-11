@@ -153,7 +153,7 @@ impl Element for TerminalElement {
             ..TerminalFramePerf::default()
         };
         let terminal_id = spec.id;
-        let should_refresh = self.runtime.update(cx, |runtime, cx| {
+        self.runtime.update(cx, |runtime, _cx| {
             let active_live_ready = match runtime.ensure_live_terminal(&spec, dimensions) {
                 Ok(_) => true,
                 Err(error) => {
@@ -164,8 +164,7 @@ impl Element for TerminalElement {
             if let Err(error) = runtime.resize_live_terminals(dimensions) {
                 eprintln!("failed to resize live terminals: {error}");
             }
-            let (drain_changed, drain_perf) = runtime.drain_live_terminals_with_perf();
-            frame_perf.drain = drain_perf;
+            frame_perf.drain = runtime.last_drain_perf();
             if active_live_ready && let Some(live) = runtime.live_terminal_mut(terminal_id) {
                 let snapshot_started_at = Instant::now();
                 match live.surface.render_snapshot() {
@@ -247,14 +246,7 @@ impl Element for TerminalElement {
                     }
                 }
             }
-            if drain_changed {
-                cx.notify();
-            }
-            drain_changed
         });
-        if should_refresh {
-            window.refresh();
-        }
         frame_perf.prepaint_duration = prepaint_started_at.elapsed();
         frame_perf.log_if_enabled();
 

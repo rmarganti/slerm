@@ -490,6 +490,46 @@ fn drain_live_terminals_feeds_hidden_and_active_surfaces() {
 }
 
 #[test]
+fn drain_live_terminals_records_last_tick_perf_for_ui_instrumentation() {
+    let active = TerminalSpec::new(
+        18,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "active",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let hidden = TerminalSpec::new(
+        19,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "hidden",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&active, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("active live spawn succeeds");
+    service
+        .ensure_live_terminal_with(&hidden, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("hidden live spawn succeeds");
+    spawner.handles[0].push_read(b"active-output".to_vec());
+    spawner.handles[1].push_read(b"hidden-output".to_vec());
+
+    assert!(service.drain_live_terminals());
+
+    let perf = service.last_drain_perf();
+    assert_eq!(perf.terminals, 2);
+    assert_eq!(perf.changed_terminals, 2);
+    assert_eq!(
+        perf.bytes_read,
+        b"active-output".len() + b"hidden-output".len()
+    );
+}
+
+#[test]
 fn drain_live_terminal_reads_past_small_chunk_bursts() {
     let spec = TerminalSpec::new(
         18,
