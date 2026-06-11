@@ -11,7 +11,7 @@ use libghostty_vt::{
     style::RgbColor,
     terminal::{
         ConformanceLevel, DeviceAttributeFeature, DeviceAttributes, DeviceType,
-        PrimaryDeviceAttributes, SecondaryDeviceAttributes, SizeReportSize,
+        PrimaryDeviceAttributes, ScrollViewport, SecondaryDeviceAttributes, SizeReportSize,
         TertiaryDeviceAttributes,
     },
 };
@@ -52,6 +52,80 @@ impl TerminalDimensions {
             cell_height: self.cell_height_px,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalKeyAction {
+    Press,
+    Release,
+    Repeat,
+}
+
+impl From<TerminalKeyAction> for key::Action {
+    fn from(value: TerminalKeyAction) -> Self {
+        match value {
+            TerminalKeyAction::Press => key::Action::Press,
+            TerminalKeyAction::Release => key::Action::Release,
+            TerminalKeyAction::Repeat => key::Action::Repeat,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TerminalKeyInput {
+    pub action: TerminalKeyAction,
+    pub key: key::Key,
+    pub mods: key::Mods,
+    pub consumed_mods: key::Mods,
+    pub unshifted_codepoint: Option<char>,
+    pub utf8: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminalMouseAction {
+    Press,
+    Release,
+    Motion,
+}
+
+impl From<TerminalMouseAction> for mouse::Action {
+    fn from(value: TerminalMouseAction) -> Self {
+        match value {
+            TerminalMouseAction::Press => mouse::Action::Press,
+            TerminalMouseAction::Release => mouse::Action::Release,
+            TerminalMouseAction::Motion => mouse::Action::Motion,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerminalMouseInput {
+    pub action: TerminalMouseAction,
+    pub button: Option<mouse::Button>,
+    pub mods: key::Mods,
+    pub x_px: f32,
+    pub y_px: f32,
+    pub screen_width_px: u32,
+    pub screen_height_px: u32,
+    pub any_button_pressed: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerminalScrollInput {
+    pub x_px: f32,
+    pub y_px: f32,
+    pub delta_rows: isize,
+    pub mods: key::Mods,
+    pub screen_width_px: u32,
+    pub screen_height_px: u32,
+    pub any_button_pressed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerminalScrollOutcome {
+    Encoded,
+    Scrolled,
+    Ignored,
 }
 
 /// Reusable libghostty input state. Events and encoders are intentionally kept
@@ -224,6 +298,139 @@ impl GhosttyTerminalSurface {
 
     pub fn update_render_state(&mut self) -> libghostty_vt::error::Result<Snapshot<'static, '_>> {
         self.render_state.update(&self.terminal)
+    }
+
+    pub fn encode_key_input(
+        &mut self,
+        key_input: TerminalKeyInput,
+    ) -> libghostty_vt::error::Result<&[u8]> {
+        self.input.response.clear();
+        self.input.sync_from_terminal(&self.terminal);
+        self.input
+            .key_event
+            .set_action(key_input.action.into())
+            .set_key(key_input.key)
+            .set_mods(key_input.mods)
+            .set_consumed_mods(key_input.consumed_mods)
+            .set_utf8(key_input.utf8);
+        self.input
+            .key_event
+            .set_unshifted_codepoint(key_input.unshifted_codepoint.unwrap_or('\0'));
+        self.input
+            .key_encoder
+            .encode_to_vec(&self.input.key_event, &mut self.input.response)?;
+        Ok(&self.input.response)
+    }
+
+    pub fn encode_mouse_input(
+        &mut self,
+        mouse_input: TerminalMouseInput,
+    ) -> libghostty_vt::error::Result<&[u8]> {
+        self.input.response.clear();
+        self.input.sync_from_terminal(&self.terminal);
+        let dimensions = self.dimensions();
+        self.input
+            .mouse_encoder
+            .set_size(mouse::EncoderSize {
+                screen_width: mouse_input.screen_width_px.max(1),
+                screen_height: mouse_input.screen_height_px.max(1),
+                cell_width: dimensions.cell_width_px,
+                cell_height: dimensions.cell_height_px,
+                padding_top: 0,
+                padding_bottom: 0,
+                padding_right: 0,
+                padding_left: 0,
+            })
+            .set_any_button_pressed(mouse_input.any_button_pressed)
+            .set_track_last_cell(true);
+        self.input
+            .mouse_event
+            .set_action(mouse_input.action.into())
+            .set_button(mouse_input.button)
+            .set_mods(mouse_input.mods)
+            .set_position(mouse::Position {
+                x: mouse_input.x_px.max(0.0),
+                y: mouse_input.y_px.max(0.0),
+            });
+        self.input
+            .mouse_encoder
+            .encode_to_vec(&self.input.mouse_event, &mut self.input.response)?;
+        Ok(&self.input.response)
+    }
+
+    pub fn handle_scroll_input(
+        &mut self,
+        scroll_input: TerminalScrollInput,
+    ) -> libghostty_vt::error::Result<TerminalScrollOutcome> {
+        self.input.response.clear();
+        if scroll_input.delta_rows == 0 {
+            return Ok(TerminalScrollOutcome::Ignored);
+        }
+        if self.terminal.is_mouse_tracking()? {
+            let button = if scroll_input.delta_rows < 0 {
+                mouse::Button::Four
+            } else {
+                mouse::Button::Five
+            };
+            let press = TerminalMouseInput {
+                action: TerminalMouseAction::Press,
+                button: Some(button),
+                mods: scroll_input.mods,
+                x_px: scroll_input.x_px,
+                y_px: scroll_input.y_px,
+                screen_width_px: scroll_input.screen_width_px,
+                screen_height_px: scroll_input.screen_height_px,
+                any_button_pressed: scroll_input.any_button_pressed,
+            };
+            let release = TerminalMouseInput {
+                action: TerminalMouseAction::Release,
+                any_button_pressed: false,
+                ..press
+            };
+            self.encode_mouse_input(press)?;
+            self.input.sync_from_terminal(&self.terminal);
+            let dimensions = self.dimensions();
+            self.input
+                .mouse_encoder
+                .set_size(mouse::EncoderSize {
+                    screen_width: scroll_input.screen_width_px.max(1),
+                    screen_height: scroll_input.screen_height_px.max(1),
+                    cell_width: dimensions.cell_width_px,
+                    cell_height: dimensions.cell_height_px,
+                    padding_top: 0,
+                    padding_bottom: 0,
+                    padding_right: 0,
+                    padding_left: 0,
+                })
+                .set_any_button_pressed(false)
+                .set_track_last_cell(true);
+            self.input
+                .mouse_event
+                .set_action(release.action.into())
+                .set_button(release.button)
+                .set_mods(release.mods)
+                .set_position(mouse::Position {
+                    x: release.x_px.max(0.0),
+                    y: release.y_px.max(0.0),
+                });
+            self.input
+                .mouse_encoder
+                .encode_to_vec(&self.input.mouse_event, &mut self.input.response)?;
+            Ok(if self.input.response.is_empty() {
+                TerminalScrollOutcome::Ignored
+            } else {
+                TerminalScrollOutcome::Encoded
+            })
+        } else {
+            self.terminal
+                .scroll_viewport(ScrollViewport::Delta(scroll_input.delta_rows));
+            self.dirty = true;
+            Ok(TerminalScrollOutcome::Scrolled)
+        }
+    }
+
+    pub fn encoded_input_response(&self) -> &[u8] {
+        &self.input.response
     }
 
     pub fn render_snapshot(&mut self) -> libghostty_vt::error::Result<TerminalRenderSnapshot> {
@@ -431,5 +638,63 @@ mod tests {
             responses.iter().any(|response| !response.is_empty()),
             "expected libghostty to generate a device-attribute response"
         );
+    }
+
+    #[test]
+    fn key_encoder_produces_shell_input_bytes() {
+        let mut surface = surface();
+
+        let bytes = surface
+            .encode_key_input(TerminalKeyInput {
+                action: TerminalKeyAction::Press,
+                key: key::Key::C,
+                mods: key::Mods::CTRL,
+                consumed_mods: key::Mods::empty(),
+                unshifted_codepoint: Some('c'),
+                utf8: None,
+            })
+            .expect("key encodes");
+
+        assert_eq!(bytes, b"\x03");
+    }
+
+    #[test]
+    fn arrow_key_encoder_produces_escape_sequence() {
+        let mut surface = surface();
+
+        let bytes = surface
+            .encode_key_input(TerminalKeyInput {
+                action: TerminalKeyAction::Press,
+                key: key::Key::ArrowUp,
+                mods: key::Mods::empty(),
+                consumed_mods: key::Mods::empty(),
+                unshifted_codepoint: None,
+                utf8: None,
+            })
+            .expect("key encodes");
+
+        assert!(!bytes.is_empty());
+    }
+
+    #[test]
+    fn wheel_without_mouse_tracking_scrolls_viewport_and_marks_dirty() {
+        let mut surface = surface();
+        surface.render_snapshot().expect("initial render succeeds");
+        assert!(!surface.is_dirty());
+
+        let outcome = surface
+            .handle_scroll_input(TerminalScrollInput {
+                x_px: 0.0,
+                y_px: 0.0,
+                delta_rows: -1,
+                mods: key::Mods::empty(),
+                screen_width_px: 160,
+                screen_height_px: 80,
+                any_button_pressed: false,
+            })
+            .expect("scroll handled");
+
+        assert_eq!(outcome, TerminalScrollOutcome::Scrolled);
+        assert!(surface.is_dirty());
     }
 }

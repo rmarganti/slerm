@@ -1,10 +1,11 @@
 use std::time::Duration;
 
 use gpui::{
-    AsyncApp, Context, Entity, FocusHandle, Focusable, IntoElement, PathPromptOptions, Render,
-    Task, Timer, WeakEntity, Window, div, prelude::*,
+    AsyncApp, Context, Entity, FocusHandle, Focusable, IntoElement, KeyDownEvent, KeyUpEvent,
+    PathPromptOptions, Render, Task, Timer, WeakEntity, Window, div, prelude::*,
 };
 
+use crate::terminal::surface::TerminalKeyAction;
 use crate::{
     actions::{
         ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveProjectMoveLeft,
@@ -23,7 +24,7 @@ use crate::{
         project_picker::ProjectPicker,
         rename_project_modal::RenameProjectModal,
         sidebar::Sidebar,
-        terminal_pane::TerminalPane,
+        terminal_pane::{TerminalPane, key_input_from_keystroke},
     },
     workspace::model::WorkspaceState,
 };
@@ -360,6 +361,72 @@ impl SlermApp {
         });
     }
 
+    fn write_terminal_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_modal.is_some() {
+            return;
+        }
+        let Some(terminal_id) = self
+            .workspace
+            .read(cx)
+            .active_project()
+            .and_then(|project| project.active_terminal())
+            .map(|terminal| terminal.id)
+        else {
+            return;
+        };
+        let action = if event.is_held {
+            TerminalKeyAction::Repeat
+        } else {
+            TerminalKeyAction::Press
+        };
+        let Some(input) = key_input_from_keystroke(&event.keystroke, action) else {
+            return;
+        };
+        if self
+            .runtime
+            .update(cx, |runtime, _| runtime.write_key_input(terminal_id, input))
+        {
+            cx.stop_propagation();
+            window.refresh();
+        }
+    }
+
+    fn write_terminal_key_up(
+        &mut self,
+        event: &KeyUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_modal.is_some() {
+            return;
+        }
+        let Some(terminal_id) = self
+            .workspace
+            .read(cx)
+            .active_project()
+            .and_then(|project| project.active_terminal())
+            .map(|terminal| terminal.id)
+        else {
+            return;
+        };
+        let Some(input) = key_input_from_keystroke(&event.keystroke, TerminalKeyAction::Release)
+        else {
+            return;
+        };
+        if self
+            .runtime
+            .update(cx, |runtime, _| runtime.write_key_input(terminal_id, input))
+        {
+            cx.stop_propagation();
+            window.refresh();
+        }
+    }
+
     fn update_workspace<T>(
         &mut self,
         cx: &mut Context<Self>,
@@ -411,6 +478,8 @@ impl Render for SlermApp {
             .on_action(cx.listener(Self::open_add_project_picker))
             .on_action(cx.listener(Self::open_project_picker))
             .on_action(cx.listener(Self::open_rename_project_modal))
+            .on_key_down(cx.listener(Self::write_terminal_key_down))
+            .on_key_up(cx.listener(Self::write_terminal_key_up))
             .size_full()
             .flex()
             .flex_col()

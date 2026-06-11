@@ -13,7 +13,13 @@ use crate::{
         PtySize, SessionId, SpawnProcessRequest, TerminalRunStatus, TerminalRuntimeState,
         TerminalSession, TerminalSize, TerminalStatus, UnixLiveTerminalSpawner,
     },
-    terminal::{TerminalId, TerminalSpec, surface::GhosttyTerminalSurface},
+    terminal::{
+        TerminalId, TerminalSpec,
+        surface::{
+            GhosttyTerminalSurface, TerminalKeyInput, TerminalMouseInput, TerminalScrollInput,
+            TerminalScrollOutcome,
+        },
+    },
     workspace::model::WorkspaceState,
 };
 
@@ -245,6 +251,63 @@ impl<P: LivePty> TerminalRuntimeService<P> {
         Ok(())
     }
 
+    pub fn write_key_input(&mut self, terminal_id: TerminalId, input: TerminalKeyInput) -> bool {
+        let Some(live) = self.live.get_mut(&terminal_id) else {
+            return false;
+        };
+        let bytes = match live.surface.encode_key_input(input) {
+            Ok(bytes) => bytes.to_vec(),
+            Err(error) => {
+                eprintln!("failed to encode key input for terminal {terminal_id:?}: {error}");
+                return false;
+            }
+        };
+        write_encoded_input(terminal_id, live, &bytes)
+    }
+
+    pub fn write_mouse_input(
+        &mut self,
+        terminal_id: TerminalId,
+        input: TerminalMouseInput,
+    ) -> bool {
+        let Some(live) = self.live.get_mut(&terminal_id) else {
+            return false;
+        };
+        let bytes = match live.surface.encode_mouse_input(input) {
+            Ok(bytes) => bytes.to_vec(),
+            Err(error) => {
+                eprintln!("failed to encode mouse input for terminal {terminal_id:?}: {error}");
+                return false;
+            }
+        };
+        write_encoded_input(terminal_id, live, &bytes)
+    }
+
+    pub fn handle_scroll_input(
+        &mut self,
+        terminal_id: TerminalId,
+        input: TerminalScrollInput,
+    ) -> bool {
+        let Some(live) = self.live.get_mut(&terminal_id) else {
+            return false;
+        };
+        let outcome = match live.surface.handle_scroll_input(input) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                eprintln!("failed to handle scroll input for terminal {terminal_id:?}: {error}");
+                return false;
+            }
+        };
+        match outcome {
+            TerminalScrollOutcome::Encoded => {
+                let bytes = live.surface.encoded_input_response().to_vec();
+                write_encoded_input(terminal_id, live, &bytes)
+            }
+            TerminalScrollOutcome::Scrolled => true,
+            TerminalScrollOutcome::Ignored => false,
+        }
+    }
+
     pub fn resize_live_terminals(
         &mut self,
         dimensions: crate::terminal::surface::TerminalDimensions,
@@ -314,6 +377,23 @@ impl TerminalRuntimeService<Pty> {
     ) -> anyhow::Result<&mut LiveTerminalRuntime<Pty>> {
         self.ensure_live_terminal_with(spec, dimensions, &mut UnixLiveTerminalSpawner)
     }
+}
+
+fn write_encoded_input<P: LivePty>(
+    terminal_id: TerminalId,
+    live: &mut LiveTerminalRuntime<P>,
+    bytes: &[u8],
+) -> bool {
+    if bytes.is_empty() {
+        return false;
+    }
+    if let Err(error) = write_all_nonblocking(&live.pty, bytes)
+        && error.kind() != io::ErrorKind::WouldBlock
+    {
+        eprintln!("failed to write terminal input for {terminal_id:?}: {error}");
+        return false;
+    }
+    true
 }
 
 fn drain_live_terminal<P: LivePty>(

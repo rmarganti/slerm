@@ -12,7 +12,7 @@ use crate::{
     terminal::{
         ProcessSpec, TerminalId, TerminalSpec,
         extension::{AgentKind, AgentSpec, TerminalExtensionSpec},
-        surface::TerminalDimensions,
+        surface::{TerminalDimensions, TerminalKeyAction, TerminalKeyInput},
     },
     workspace::model::WorkspaceState,
 };
@@ -709,6 +709,38 @@ fn live_terminal_resize_updates_surface_and_pty() {
         spawner.handles[0].resizes(),
         vec![PtySize::from_dimensions(dimensions)]
     );
+}
+
+#[test]
+fn write_key_input_encodes_and_writes_to_live_pty() {
+    let spec = TerminalSpec::new(
+        16,
+        ProjectId(1),
+        TerminalExtensionSpec::Plain,
+        "terminal",
+        "/tmp",
+        ProcessSpec::shell(),
+    );
+    let mut service = TerminalRuntimeService::<MockLivePty>::new_with_live_pty();
+    let mut spawner = MockLiveSpawner::default();
+    service
+        .ensure_live_terminal_with(&spec, TerminalDimensions::DEFAULT, &mut spawner)
+        .expect("live spawn succeeds");
+
+    let wrote = service.write_key_input(
+        spec.id,
+        TerminalKeyInput {
+            action: TerminalKeyAction::Press,
+            key: libghostty_vt::key::Key::C,
+            mods: libghostty_vt::key::Mods::CTRL,
+            consumed_mods: libghostty_vt::key::Mods::empty(),
+            unshifted_codepoint: Some('c'),
+            utf8: None,
+        },
+    );
+
+    assert!(wrote);
+    assert_eq!(spawner.handles[0].written(), vec![b"\x03".to_vec()]);
 }
 
 #[test]
