@@ -3,7 +3,7 @@
     reason = "phase 1 terminal surface skeleton is wired in later phases"
 )]
 
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, fmt::Write as _, rc::Rc};
 
 use libghostty_vt::{
     RenderState, Terminal, TerminalOptions, key, mouse,
@@ -15,6 +15,8 @@ use libghostty_vt::{
         TertiaryDeviceAttributes,
     },
 };
+
+use crate::theme::{self, TerminalTheme};
 
 /// Terminal grid and pixel dimensions used by libghostty and the PTY winsize.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -137,6 +139,7 @@ impl GhosttyTerminalSurface {
             rows: dimensions.borrow().rows,
             max_scrollback: 1000,
         })?;
+        apply_theme(&mut terminal, theme::active().terminal);
         // TerminalOptions carries cell dimensions only; resize also informs
         // libghostty of per-cell pixel dimensions used for size reports and
         // future image protocols.
@@ -289,6 +292,19 @@ impl GhosttyTerminalSurface {
     pub fn take_pending_pty_writes(&mut self) -> Vec<Vec<u8>> {
         std::mem::take(&mut *self.pending_pty_writes.borrow_mut())
     }
+}
+
+fn apply_theme(terminal: &mut Terminal<'static, 'static>, theme: TerminalTheme) {
+    let mut sequence = String::new();
+
+    for (index, color) in theme.palette.iter().enumerate() {
+        let _ = write!(sequence, "\x1b]4;{index};#{color:06x}\x1b\\");
+    }
+    let _ = write!(sequence, "\x1b]10;#{:06x}\x1b\\", theme.foreground);
+    let _ = write!(sequence, "\x1b]11;#{:06x}\x1b\\", theme.background);
+    let _ = write!(sequence, "\x1b]12;#{:06x}\x1b\\", theme.cursor);
+
+    terminal.vt_write(sequence.as_bytes());
 }
 
 fn register_effects(
