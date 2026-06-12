@@ -64,14 +64,22 @@ struct TerminalElement {
 struct PrepaintState {
     background_quad: PaintQuad,
     metrics: TerminalLayoutMetrics,
+    backgrounds: Vec<PaintQuad>,
     runs: Vec<PaintedRun>,
     cursor: Option<PaintQuad>,
 }
 
 struct PaintedRun {
-    background: Option<PaintQuad>,
     line: Option<ShapedLine>,
     origin: gpui::Point<Pixels>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct BackgroundSpan {
+    row: u16,
+    x: u16,
+    cells: u16,
+    color: RgbColor,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -180,6 +188,7 @@ impl Element for TerminalElement {
             return empty_prepaint(metrics, theme.bg.into());
         };
 
+        let mut backgrounds = Vec::new();
         let mut runs = Vec::new();
         let mut cursor = None;
         let mut background: Hsla = theme.bg.into();
@@ -208,10 +217,13 @@ impl Element for TerminalElement {
                         frame_perf.rows_considered = usize::from(snapshot.rows);
                         frame_perf.cells_considered =
                             usize::from(snapshot.rows) * usize::from(snapshot.columns);
-                        frame_perf.render_items =
+                        let render_items: usize =
                             snapshot.row_runs.iter().map(|row| row.runs.len()).sum();
+                        frame_perf.render_items = render_items;
                         background = rgb_to_hsla(snapshot.colors.background);
-                        let mut used_cache_keys = HashSet::new();
+                        runs.reserve(render_items);
+                        let mut background_spans = Vec::with_capacity(render_items);
+                        let mut used_cache_keys = HashSet::with_capacity(render_items);
                         for row in snapshot.row_runs {
                             let y = metrics.origin.y + cell_height * f32::from(row.y);
                             for run in row.runs {
@@ -223,16 +235,12 @@ impl Element for TerminalElement {
                                         background_color.unwrap_or(snapshot.colors.background);
                                     background_color = Some(original_foreground);
                                 }
-                                let x = metrics.origin.x + cell_width * f32::from(run.x);
-                                let width = cell_width * f32::from(run.cells);
                                 if let Some(color) = background_color {
-                                    runs.push(PaintedRun {
-                                        background: Some(fill(
-                                            Bounds::new(point(x, y), size(width, cell_height)),
-                                            rgb_to_hsla(color),
-                                        )),
-                                        line: None,
-                                        origin: point(x, y),
+                                    background_spans.push(BackgroundSpan {
+                                        row: row.y,
+                                        x: run.x,
+                                        cells: run.cells,
+                                        color,
                                     });
                                 }
 
@@ -254,6 +262,14 @@ impl Element for TerminalElement {
                                 );
                             }
                         }
+                        let background_spans = merge_background_spans(background_spans);
+                        frame_perf.background_quads = background_spans.len();
+                        backgrounds.reserve(background_spans.len());
+                        backgrounds.extend(
+                            background_spans
+                                .into_iter()
+                                .map(|span| background_span_quad(span, metrics)),
+                        );
                         retain_terminal_shaped_run_cache(terminal_id, &used_cache_keys);
                         if let Some(cursor_position) = snapshot.cursor {
                             let x = metrics.origin.x + cell_width * f32::from(cursor_position.x);
@@ -288,6 +304,7 @@ impl Element for TerminalElement {
         PrepaintState {
             background_quad: fill(terminal_bounds, background),
             metrics,
+            backgrounds,
             runs,
             cursor,
         }
@@ -304,10 +321,10 @@ impl Element for TerminalElement {
         cx: &mut App,
     ) {
         window.paint_quad(prepaint.background_quad.clone());
+        for background in prepaint.backgrounds.drain(..) {
+            window.paint_quad(background);
+        }
         for run in &mut prepaint.runs {
-            if let Some(background) = run.background.take() {
-                window.paint_quad(background);
-            }
             if let Some(line) = run.line.take() {
                 line.paint(run.origin, prepaint.metrics.cell_height, window, cx)
                     .ok();
@@ -368,10 +385,38 @@ fn append_text_run_to_prepaint(
     );
     used_cache_keys.insert(key);
     painted_runs.push(PaintedRun {
-        background: None,
         line: Some(line),
         origin,
     });
+}
+
+fn merge_background_spans(mut spans: Vec<BackgroundSpan>) -> Vec<BackgroundSpan> {
+    spans.sort_by_key(|span| (span.row, span.x));
+    let mut merged: Vec<BackgroundSpan> = Vec::with_capacity(spans.len());
+
+    for span in spans {
+        if let Some(previous) = merged.last_mut()
+            && previous.row == span.row
+            && previous.color == span.color
+            && previous.x.saturating_add(previous.cells) == span.x
+        {
+            previous.cells = previous.cells.saturating_add(span.cells);
+            continue;
+        }
+        merged.push(span);
+    }
+
+    merged
+}
+
+fn background_span_quad(span: BackgroundSpan, metrics: TerminalLayoutMetrics) -> PaintQuad {
+    let x = metrics.origin.x + metrics.cell_width * f32::from(span.x);
+    let y = metrics.origin.y + metrics.cell_height * f32::from(span.row);
+    let width = metrics.cell_width * f32::from(span.cells);
+    fill(
+        Bounds::new(point(x, y), size(width, metrics.cell_height)),
+        rgb_to_hsla(span.color),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -848,6 +893,7 @@ fn empty_prepaint(metrics: TerminalLayoutMetrics, background: Hsla) -> PrepaintS
     PrepaintState {
         background_quad: fill(metrics.render_bounds, background),
         metrics,
+        backgrounds: Vec::new(),
         runs: Vec::new(),
         cursor: None,
     }
@@ -974,6 +1020,78 @@ mod tests {
             assert_eq!(input.utf8.as_deref(), Some(character));
             assert!(input.consumed_mods.contains(key::Mods::SHIFT));
         }
+    }
+
+    #[test]
+    fn adjacent_same_color_background_spans_merge_on_same_row() {
+        let color = RgbColor { r: 1, g: 2, b: 3 };
+
+        let merged = merge_background_spans(vec![
+            BackgroundSpan {
+                row: 0,
+                x: 0,
+                cells: 2,
+                color,
+            },
+            BackgroundSpan {
+                row: 0,
+                x: 2,
+                cells: 3,
+                color,
+            },
+        ]);
+
+        assert_eq!(
+            merged,
+            vec![BackgroundSpan {
+                row: 0,
+                x: 0,
+                cells: 5,
+                color,
+            }]
+        );
+    }
+
+    #[test]
+    fn separated_background_spans_do_not_merge() {
+        let color = RgbColor { r: 1, g: 2, b: 3 };
+
+        let merged = merge_background_spans(vec![
+            BackgroundSpan {
+                row: 0,
+                x: 0,
+                cells: 2,
+                color,
+            },
+            BackgroundSpan {
+                row: 0,
+                x: 3,
+                cells: 2,
+                color,
+            },
+        ]);
+
+        assert_eq!(merged.len(), 2);
+    }
+
+    #[test]
+    fn different_color_background_spans_do_not_merge() {
+        let merged = merge_background_spans(vec![
+            BackgroundSpan {
+                row: 0,
+                x: 0,
+                cells: 2,
+                color: RgbColor { r: 1, g: 2, b: 3 },
+            },
+            BackgroundSpan {
+                row: 0,
+                x: 2,
+                cells: 2,
+                color: RgbColor { r: 3, g: 2, b: 1 },
+            },
+        ]);
+
+        assert_eq!(merged.len(), 2);
     }
 
     #[test]
