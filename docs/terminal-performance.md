@@ -13,7 +13,9 @@ Each line includes:
 - libghostty snapshot/update duration
 - rows and cells considered for rendering
 - render items produced by the current row/run snapshot path
+- merged terminal background quad count
 - GPUI `shape_line` call count
+- shaped-run cache hits and misses
 
 Manual smoke scenarios for baseline/after-change comparisons:
 
