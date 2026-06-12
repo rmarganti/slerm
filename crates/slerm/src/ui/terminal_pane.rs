@@ -19,7 +19,7 @@ use crate::{
         },
     },
     theme,
-    ui::terminal_layout::terminal_layout_metrics,
+    ui::terminal_layout::{TerminalLayoutMetrics, terminal_layout_metrics},
     workspace::model::WorkspaceState,
 };
 
@@ -59,7 +59,7 @@ struct TerminalElement {
 
 struct PrepaintState {
     background_quad: PaintQuad,
-    cell_height: Pixels,
+    metrics: TerminalLayoutMetrics,
     runs: Vec<PaintedRun>,
     cursor: Option<PaintQuad>,
 }
@@ -139,7 +139,6 @@ impl Element for TerminalElement {
         let cell_width = metrics.cell_width;
         let cell_height = metrics.cell_height;
         let terminal_bounds = metrics.render_bounds;
-        let _terminal_pixel_size = (metrics.pixel_width, metrics.pixel_height);
         let dimensions = metrics.dimensions();
 
         let Some(spec) = self
@@ -149,7 +148,7 @@ impl Element for TerminalElement {
             .and_then(|project| project.active_terminal())
             .cloned()
         else {
-            return empty_prepaint(terminal_bounds, theme.bg.into(), cell_height);
+            return empty_prepaint(metrics, theme.bg.into());
         };
 
         let mut runs = Vec::new();
@@ -254,7 +253,7 @@ impl Element for TerminalElement {
 
         PrepaintState {
             background_quad: fill(terminal_bounds, background),
-            cell_height,
+            metrics,
             runs,
             cursor,
         }
@@ -264,7 +263,7 @@ impl Element for TerminalElement {
         &mut self,
         _id: Option<&GlobalElementId>,
         _inspector_id: Option<&gpui::InspectorElementId>,
-        bounds: Bounds<Pixels>,
+        _bounds: Bounds<Pixels>,
         _request_layout: &mut Self::RequestLayoutState,
         prepaint: &mut Self::PrepaintState,
         window: &mut Window,
@@ -276,7 +275,7 @@ impl Element for TerminalElement {
                 window.paint_quad(background);
             }
             if let Some(line) = run.line.take() {
-                line.paint(run.origin, prepaint.cell_height, window, cx)
+                line.paint(run.origin, prepaint.metrics.cell_height, window, cx)
                     .ok();
             }
         }
@@ -287,8 +286,7 @@ impl Element for TerminalElement {
         register_terminal_input_handlers(
             self.workspace.clone(),
             self.runtime.clone(),
-            bounds,
-            prepaint.cell_height,
+            prepaint.metrics,
             window,
         );
     }
@@ -330,7 +328,7 @@ fn append_text_cells_to_prepaint(
                 underline: None,
                 strikethrough: None,
             }],
-            None,
+            Some(cell_width),
         )),
         origin,
     });
@@ -339,8 +337,7 @@ fn append_text_cells_to_prepaint(
 fn register_terminal_input_handlers(
     workspace: Entity<WorkspaceState>,
     runtime: Entity<TerminalRuntimeService>,
-    bounds: Bounds<Pixels>,
-    cell_height: Pixels,
+    metrics: TerminalLayoutMetrics,
     window: &mut Window,
 ) {
     let key_workspace = workspace.clone();
@@ -388,7 +385,7 @@ fn register_terminal_input_handlers(
     let mouse_down_workspace = workspace.clone();
     let mouse_down_runtime = runtime.clone();
     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
-        if !phase.bubble() || !point_in_bounds(event.position, bounds) {
+        if !phase.bubble() || !point_in_bounds(event.position, metrics.render_bounds) {
             return;
         }
         let Some(terminal_id) = active_terminal_id(&mouse_down_workspace, cx) else {
@@ -402,7 +399,7 @@ fn register_terminal_input_handlers(
             Some(button),
             event.position,
             event.modifiers,
-            bounds,
+            metrics,
             true,
         );
         if mouse_down_runtime.update(cx, |runtime, _| {
@@ -416,7 +413,7 @@ fn register_terminal_input_handlers(
     let mouse_up_workspace = workspace.clone();
     let mouse_up_runtime = runtime.clone();
     window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
-        if !phase.bubble() || !point_in_bounds(event.position, bounds) {
+        if !phase.bubble() || !point_in_bounds(event.position, metrics.render_bounds) {
             return;
         }
         let Some(terminal_id) = active_terminal_id(&mouse_up_workspace, cx) else {
@@ -430,7 +427,7 @@ fn register_terminal_input_handlers(
             Some(button),
             event.position,
             event.modifiers,
-            bounds,
+            metrics,
             false,
         );
         if mouse_up_runtime.update(cx, |runtime, _| {
@@ -445,7 +442,9 @@ fn register_terminal_input_handlers(
     let mouse_move_runtime = runtime.clone();
     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
         let any_button_pressed = event.pressed_button.is_some();
-        if !phase.bubble() || (!point_in_bounds(event.position, bounds) && !any_button_pressed) {
+        if !phase.bubble()
+            || (!point_in_bounds(event.position, metrics.render_bounds) && !any_button_pressed)
+        {
             return;
         }
         let Some(terminal_id) = active_terminal_id(&mouse_move_workspace, cx) else {
@@ -456,7 +455,7 @@ fn register_terminal_input_handlers(
             event.pressed_button.and_then(mouse_button),
             event.position,
             event.modifiers,
-            bounds,
+            metrics,
             any_button_pressed,
         );
         if mouse_move_runtime.update(cx, |runtime, _| {
@@ -470,13 +469,13 @@ fn register_terminal_input_handlers(
     let scroll_workspace = workspace;
     let scroll_runtime = runtime;
     window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
-        if !phase.bubble() || !point_in_bounds(event.position, bounds) {
+        if !phase.bubble() || !point_in_bounds(event.position, metrics.render_bounds) {
             return;
         }
         let Some(terminal_id) = active_terminal_id(&scroll_workspace, cx) else {
             return;
         };
-        let input = scroll_input(event, bounds, cell_height);
+        let input = scroll_input(event, metrics);
         if scroll_runtime.update(cx, |runtime, _| {
             runtime.handle_scroll_input(terminal_id, input)
         }) {
@@ -666,34 +665,28 @@ fn mouse_input(
     button: Option<mouse::Button>,
     position: gpui::Point<Pixels>,
     modifiers: gpui::Modifiers,
-    bounds: Bounds<Pixels>,
+    metrics: TerminalLayoutMetrics,
     any_button_pressed: bool,
 ) -> TerminalMouseInput {
-    let (x_px, y_px) = local_position(position, bounds);
-    let (screen_width_px, screen_height_px) = bounds_size_px(bounds);
+    let (x_px, y_px) = local_position(position, metrics.render_bounds);
     TerminalMouseInput {
         action,
         button,
         mods: key_mods(modifiers),
         x_px,
         y_px,
-        screen_width_px,
-        screen_height_px,
+        screen_width_px: metrics.pixel_width,
+        screen_height_px: metrics.pixel_height,
         any_button_pressed,
     }
 }
 
-fn scroll_input(
-    event: &ScrollWheelEvent,
-    bounds: Bounds<Pixels>,
-    cell_height: Pixels,
-) -> TerminalScrollInput {
-    let (x_px, y_px) = local_position(event.position, bounds);
-    let (screen_width_px, screen_height_px) = bounds_size_px(bounds);
+fn scroll_input(event: &ScrollWheelEvent, metrics: TerminalLayoutMetrics) -> TerminalScrollInput {
+    let (x_px, y_px) = local_position(event.position, metrics.render_bounds);
     let delta_rows = match event.delta {
         ScrollDelta::Pixels(delta) => {
             let dy: f32 = delta.y.into();
-            let line_height: f32 = cell_height.into();
+            let line_height: f32 = metrics.cell_height.into();
             (dy / line_height.max(1.0)).round() as isize
         }
         ScrollDelta::Lines(delta) => delta.y.round() as isize,
@@ -703,8 +696,8 @@ fn scroll_input(
         y_px,
         delta_rows,
         mods: key_mods(event.modifiers),
-        screen_width_px,
-        screen_height_px,
+        screen_width_px: metrics.pixel_width,
+        screen_height_px: metrics.pixel_height,
         any_button_pressed: false,
     }
 }
@@ -715,15 +708,6 @@ fn local_position(position: gpui::Point<Pixels>, bounds: Bounds<Pixels>) -> (f32
     (x.max(0.0), y.max(0.0))
 }
 
-fn bounds_size_px(bounds: Bounds<Pixels>) -> (u32, u32) {
-    let width: f32 = bounds.size.width.into();
-    let height: f32 = bounds.size.height.into();
-    (
-        width.ceil().max(1.0).min(u32::MAX as f32) as u32,
-        height.ceil().max(1.0).min(u32::MAX as f32) as u32,
-    )
-}
-
 fn point_in_bounds(position: gpui::Point<Pixels>, bounds: Bounds<Pixels>) -> bool {
     position.x >= bounds.left()
         && position.x <= bounds.right()
@@ -731,10 +715,10 @@ fn point_in_bounds(position: gpui::Point<Pixels>, bounds: Bounds<Pixels>) -> boo
         && position.y <= bounds.bottom()
 }
 
-fn empty_prepaint(bounds: Bounds<Pixels>, background: Hsla, cell_height: Pixels) -> PrepaintState {
+fn empty_prepaint(metrics: TerminalLayoutMetrics, background: Hsla) -> PrepaintState {
     PrepaintState {
-        background_quad: fill(bounds, background),
-        cell_height,
+        background_quad: fill(metrics.render_bounds, background),
+        metrics,
         runs: Vec::new(),
         cursor: None,
     }
@@ -799,6 +783,34 @@ mod tests {
         assert_eq!(input.unshifted_codepoint, Some(';'));
         assert_eq!(input.utf8.as_deref(), Some(":"));
         assert!(input.consumed_mods.contains(key::Mods::SHIFT));
+    }
+
+    #[test]
+    fn mouse_input_uses_snapped_terminal_metrics() {
+        let metrics = TerminalLayoutMetrics {
+            origin: point(px(10.0), px(20.0)),
+            render_bounds: gpui::bounds(point(px(10.0), px(20.0)), size(px(80.0), px(60.0))),
+            cell_width: px(8.0),
+            cell_height: px(12.0),
+            columns: 10,
+            rows: 5,
+            pixel_width: 80,
+            pixel_height: 60,
+        };
+
+        let input = mouse_input(
+            TerminalMouseAction::Press,
+            Some(mouse::Button::Left),
+            point(px(18.5), px(44.0)),
+            gpui::Modifiers::default(),
+            metrics,
+            true,
+        );
+
+        assert_eq!(input.x_px, 8.5);
+        assert_eq!(input.y_px, 24.0);
+        assert_eq!(input.screen_width_px, 80);
+        assert_eq!(input.screen_height_px, 60);
     }
 
     #[test]
