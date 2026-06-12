@@ -14,11 +14,12 @@ use crate::{
     terminal::{
         font::TerminalFontSelection,
         surface::{
-            TerminalDimensions, TerminalKeyAction, TerminalKeyInput, TerminalMouseAction,
-            TerminalMouseInput, TerminalScrollInput,
+            TerminalKeyAction, TerminalKeyInput, TerminalMouseAction, TerminalMouseInput,
+            TerminalScrollInput,
         },
     },
     theme,
+    ui::terminal_layout::terminal_layout_metrics,
     workspace::model::WorkspaceState,
 };
 
@@ -129,11 +130,17 @@ impl Element for TerminalElement {
             }],
             None,
         );
-        let cell_width = probe.width.max(px(1.0));
-        let cell_height = text_style
-            .line_height_in_pixels(window.rem_size())
-            .max(px(1.0));
-        let dimensions = dimensions_for_bounds(bounds, cell_width, cell_height);
+        let metrics = terminal_layout_metrics(
+            bounds,
+            probe.width.max(px(1.0)),
+            font_size,
+            window.scale_factor(),
+        );
+        let cell_width = metrics.cell_width;
+        let cell_height = metrics.cell_height;
+        let terminal_bounds = metrics.render_bounds;
+        let _terminal_pixel_size = (metrics.pixel_width, metrics.pixel_height);
+        let dimensions = metrics.dimensions();
 
         let Some(spec) = self
             .workspace
@@ -142,7 +149,7 @@ impl Element for TerminalElement {
             .and_then(|project| project.active_terminal())
             .cloned()
         else {
-            return empty_prepaint(bounds, theme.bg.into(), cell_width, cell_height);
+            return empty_prepaint(terminal_bounds, theme.bg.into(), cell_height);
         };
 
         let mut runs = Vec::new();
@@ -177,7 +184,7 @@ impl Element for TerminalElement {
                             snapshot.row_runs.iter().map(|row| row.runs.len()).sum();
                         background = rgb_to_hsla(snapshot.colors.background);
                         for row in snapshot.row_runs {
-                            let y = bounds.top() + cell_height * f32::from(row.y);
+                            let y = metrics.origin.y + cell_height * f32::from(row.y);
                             for run in row.runs {
                                 let mut foreground = run.foreground;
                                 let mut background_color = run.background;
@@ -187,7 +194,7 @@ impl Element for TerminalElement {
                                         background_color.unwrap_or(snapshot.colors.background);
                                     background_color = Some(original_foreground);
                                 }
-                                let x = bounds.left() + cell_width * f32::from(run.x);
+                                let x = metrics.origin.x + cell_width * f32::from(run.x);
                                 let width = cell_width * f32::from(run.cells);
                                 if let Some(color) = background_color {
                                     runs.push(PaintedRun {
@@ -206,7 +213,7 @@ impl Element for TerminalElement {
                                     &run.text,
                                     font.clone(),
                                     rgb_to_hsla(foreground),
-                                    bounds.left(),
+                                    metrics.origin.x,
                                     y,
                                     cell_width,
                                     font_size,
@@ -216,8 +223,8 @@ impl Element for TerminalElement {
                             }
                         }
                         if let Some(cursor_position) = snapshot.cursor {
-                            let x = bounds.left() + cell_width * f32::from(cursor_position.x);
-                            let y = bounds.top() + cell_height * f32::from(cursor_position.y);
+                            let x = metrics.origin.x + cell_width * f32::from(cursor_position.x);
+                            let y = metrics.origin.y + cell_height * f32::from(cursor_position.y);
                             let cursor_color =
                                 snapshot.colors.cursor.unwrap_or(snapshot.colors.foreground);
                             let cursor_bounds = match cursor_position.style {
@@ -246,7 +253,7 @@ impl Element for TerminalElement {
         frame_perf.log_if_enabled();
 
         PrepaintState {
-            background_quad: fill(bounds, background),
+            background_quad: fill(terminal_bounds, background),
             cell_height,
             runs,
             cursor,
@@ -724,41 +731,13 @@ fn point_in_bounds(position: gpui::Point<Pixels>, bounds: Bounds<Pixels>) -> boo
         && position.y <= bounds.bottom()
 }
 
-fn empty_prepaint(
-    bounds: Bounds<Pixels>,
-    background: Hsla,
-    _cell_width: Pixels,
-    cell_height: Pixels,
-) -> PrepaintState {
+fn empty_prepaint(bounds: Bounds<Pixels>, background: Hsla, cell_height: Pixels) -> PrepaintState {
     PrepaintState {
         background_quad: fill(bounds, background),
         cell_height,
         runs: Vec::new(),
         cursor: None,
     }
-}
-
-fn dimensions_for_bounds(
-    bounds: Bounds<Pixels>,
-    cell_width: Pixels,
-    cell_height: Pixels,
-) -> TerminalDimensions {
-    let width: f32 = bounds.size.width.into();
-    let height: f32 = bounds.size.height.into();
-    let cell_width_f: f32 = cell_width.into();
-    let cell_height_f: f32 = cell_height.into();
-    TerminalDimensions::new(
-        (width / cell_width_f)
-            .floor()
-            .max(1.0)
-            .min(f32::from(u16::MAX)) as u16,
-        (height / cell_height_f)
-            .floor()
-            .max(1.0)
-            .min(f32::from(u16::MAX)) as u16,
-        cell_width_f.ceil().max(1.0).min(u32::MAX as f32) as u32,
-        cell_height_f.ceil().max(1.0).min(u32::MAX as f32) as u32,
-    )
 }
 
 fn rgb_to_hsla(color: RgbColor) -> Hsla {
