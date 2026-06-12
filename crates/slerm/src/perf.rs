@@ -35,6 +35,8 @@ pub struct TerminalFramePerf {
     pub cells_considered: usize,
     pub render_items: usize,
     pub shape_line_calls: usize,
+    pub shaped_run_cache_hits: usize,
+    pub shaped_run_cache_misses: usize,
     pub prepaint_duration: Duration,
 }
 
@@ -42,7 +44,7 @@ impl TerminalFramePerf {
     pub fn log_if_enabled(&self) {
         if terminal_perf_enabled() {
             eprintln!(
-                "slerm terminal perf: prepaint={:.2?} drain={:.2?} drain_bytes={} drain_changed_terminals={} snapshot={:.2?} rows={} cells={} render_items={} shape_line_calls={}",
+                "slerm terminal perf: prepaint={:.2?} drain={:.2?} drain_bytes={} drain_changed_terminals={} snapshot={:.2?} rows={} cells={} render_items={} shape_line_calls={} shaped_run_cache_hits={} shaped_run_cache_misses={}",
                 self.prepaint_duration,
                 self.drain.duration,
                 self.drain.bytes_read,
@@ -52,6 +54,8 @@ impl TerminalFramePerf {
                 self.cells_considered,
                 self.render_items,
                 self.shape_line_calls,
+                self.shaped_run_cache_hits,
+                self.shaped_run_cache_misses,
             );
         }
     }

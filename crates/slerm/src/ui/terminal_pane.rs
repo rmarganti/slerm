@@ -1,4 +1,8 @@
-use std::time::Instant;
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 
 use gpui::{
     App, Bounds, Element, ElementId, Entity, GlobalElementId, Hsla, IntoElement, KeyDownEvent,
@@ -15,7 +19,7 @@ use crate::{
         font::TerminalFontSelection,
         surface::{
             TerminalKeyAction, TerminalKeyInput, TerminalMouseAction, TerminalMouseInput,
-            TerminalScrollInput,
+            TerminalRenderRun, TerminalScrollInput,
         },
     },
     theme,
@@ -68,6 +72,31 @@ struct PaintedRun {
     background: Option<PaintQuad>,
     line: Option<ShapedLine>,
     origin: gpui::Point<Pixels>,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct ShapedRunCacheKey {
+    terminal_id: crate::terminal::TerminalId,
+    row: u16,
+    x: u16,
+    cells: u16,
+    text: String,
+    color: (u32, u32, u32, u32),
+    font_family: String,
+    font_weight: u32,
+    font_style: gpui::FontStyle,
+    font_size: u32,
+    cell_width: u32,
+    line_height: u32,
+}
+
+#[derive(Default)]
+struct ShapedRunCache {
+    lines: HashMap<ShapedRunCacheKey, ShapedLine>,
+}
+
+thread_local! {
+    static SHAPED_RUN_CACHE: RefCell<ShapedRunCache> = RefCell::new(ShapedRunCache::default());
 }
 
 impl IntoElement for TerminalElement {
@@ -182,6 +211,7 @@ impl Element for TerminalElement {
                         frame_perf.render_items =
                             snapshot.row_runs.iter().map(|row| row.runs.len()).sum();
                         background = rgb_to_hsla(snapshot.colors.background);
+                        let mut used_cache_keys = HashSet::new();
                         for row in snapshot.row_runs {
                             let y = metrics.origin.y + cell_height * f32::from(row.y);
                             for run in row.runs {
@@ -206,21 +236,25 @@ impl Element for TerminalElement {
                                     });
                                 }
 
-                                append_text_cells_to_prepaint(
+                                append_text_run_to_prepaint(
                                     &mut runs,
-                                    run.x,
-                                    &run.text,
+                                    terminal_id,
+                                    row.y,
+                                    &run,
                                     font.clone(),
                                     rgb_to_hsla(foreground),
                                     metrics.origin.x,
                                     y,
                                     cell_width,
+                                    cell_height,
                                     font_size,
                                     window,
                                     &mut frame_perf,
+                                    &mut used_cache_keys,
                                 );
                             }
                         }
+                        retain_terminal_shaped_run_cache(terminal_id, &used_cache_keys);
                         if let Some(cursor_position) = snapshot.cursor {
                             let x = metrics.origin.x + cell_width * f32::from(cursor_position.x);
                             let y = metrics.origin.y + cell_height * f32::from(cursor_position.y);
@@ -293,31 +327,73 @@ impl Element for TerminalElement {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn append_text_cells_to_prepaint(
+fn append_text_run_to_prepaint(
     painted_runs: &mut Vec<PaintedRun>,
-    x: u16,
-    text: &str,
+    terminal_id: crate::terminal::TerminalId,
+    row: u16,
+    run: &TerminalRenderRun,
     font: gpui::Font,
     color: Hsla,
     bounds_left: Pixels,
     y: Pixels,
     cell_width: Pixels,
+    line_height: Pixels,
     font_size: Pixels,
     window: &mut Window,
     frame_perf: &mut TerminalFramePerf,
+    used_cache_keys: &mut HashSet<ShapedRunCacheKey>,
 ) {
-    if text
+    if run
+        .text
         .chars()
         .all(|character| character == ' ' || character.is_control())
     {
         return;
     }
 
-    let origin = point(bounds_left + cell_width * f32::from(x), y);
-    frame_perf.shape_line_calls += 1;
+    let origin = point(bounds_left + cell_width * f32::from(run.x), y);
+    let font = if run.bold { font.bold() } else { font };
+    let key = shaped_run_cache_key(
+        terminal_id,
+        row,
+        run,
+        &font,
+        color,
+        font_size,
+        cell_width,
+        line_height,
+    );
+    let line = shaped_terminal_run(
+        &key, &run.text, font, color, font_size, cell_width, window, frame_perf,
+    );
+    used_cache_keys.insert(key);
     painted_runs.push(PaintedRun {
         background: None,
-        line: Some(window.text_system().shape_line(
+        line: Some(line),
+        origin,
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn shaped_terminal_run(
+    key: &ShapedRunCacheKey,
+    text: &str,
+    font: gpui::Font,
+    color: Hsla,
+    font_size: Pixels,
+    cell_width: Pixels,
+    window: &mut Window,
+    frame_perf: &mut TerminalFramePerf,
+) -> ShapedLine {
+    SHAPED_RUN_CACHE.with_borrow_mut(|cache| {
+        if let Some(line) = cache.lines.get(key) {
+            frame_perf.shaped_run_cache_hits += 1;
+            return line.clone();
+        }
+
+        frame_perf.shape_line_calls += 1;
+        frame_perf.shaped_run_cache_misses += 1;
+        let line = window.text_system().shape_line(
             text.to_string().into(),
             font_size,
             &[TextRun {
@@ -329,9 +405,62 @@ fn append_text_cells_to_prepaint(
                 strikethrough: None,
             }],
             Some(cell_width),
-        )),
-        origin,
+        );
+        cache.lines.insert(key.clone(), line.clone());
+        line
+    })
+}
+
+fn retain_terminal_shaped_run_cache(
+    terminal_id: crate::terminal::TerminalId,
+    used_keys: &HashSet<ShapedRunCacheKey>,
+) {
+    SHAPED_RUN_CACHE.with_borrow_mut(|cache| {
+        cache
+            .lines
+            .retain(|key, _| key.terminal_id != terminal_id || used_keys.contains(key));
     });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn shaped_run_cache_key(
+    terminal_id: crate::terminal::TerminalId,
+    row: u16,
+    run: &TerminalRenderRun,
+    font: &gpui::Font,
+    color: Hsla,
+    font_size: Pixels,
+    cell_width: Pixels,
+    line_height: Pixels,
+) -> ShapedRunCacheKey {
+    ShapedRunCacheKey {
+        terminal_id,
+        row,
+        x: run.x,
+        cells: run.cells,
+        text: run.text.clone(),
+        color: hsla_key(color),
+        font_family: font.family.to_string(),
+        font_weight: font.weight.0.to_bits(),
+        font_style: font.style,
+        font_size: pixels_key(font_size),
+        cell_width: pixels_key(cell_width),
+        line_height: pixels_key(line_height),
+    }
+}
+
+fn hsla_key(color: Hsla) -> (u32, u32, u32, u32) {
+    (
+        color.h.to_bits(),
+        color.s.to_bits(),
+        color.l.to_bits(),
+        color.a.to_bits(),
+    )
+}
+
+fn pixels_key(pixels: Pixels) -> u32 {
+    let value: f32 = pixels.into();
+    value.to_bits()
 }
 
 fn register_terminal_input_handlers(
@@ -845,5 +974,137 @@ mod tests {
             assert_eq!(input.utf8.as_deref(), Some(character));
             assert!(input.consumed_mods.contains(key::Mods::SHIFT));
         }
+    }
+
+    #[test]
+    fn shaped_run_cache_key_changes_when_content_or_metrics_change() {
+        let terminal_id = crate::terminal::TerminalId(7);
+        let font = gpui::font("Test Mono");
+        let color = gpui::hsla(0.1, 0.2, 0.3, 1.0);
+        let run = TerminalRenderRun {
+            x: 2,
+            cells: 5,
+            text: "hello".to_string(),
+            foreground: RgbColor { r: 1, g: 2, b: 3 },
+            background: None,
+            bold: false,
+            inverse: false,
+        };
+
+        let key = shaped_run_cache_key(
+            terminal_id,
+            3,
+            &run,
+            &font,
+            color,
+            px(14.0),
+            px(8.0),
+            px(16.0),
+        );
+
+        let mut changed_text = run.clone();
+        changed_text.text = "hullo".to_string();
+        assert_ne!(
+            key,
+            shaped_run_cache_key(
+                terminal_id,
+                3,
+                &changed_text,
+                &font,
+                color,
+                px(14.0),
+                px(8.0),
+                px(16.0)
+            )
+        );
+        assert_ne!(
+            key,
+            shaped_run_cache_key(
+                terminal_id,
+                3,
+                &run,
+                &font,
+                color,
+                px(15.0),
+                px(8.0),
+                px(16.0),
+            )
+        );
+        assert_ne!(
+            key,
+            shaped_run_cache_key(
+                terminal_id,
+                3,
+                &run,
+                &font,
+                color,
+                px(14.0),
+                px(9.0),
+                px(16.0),
+            )
+        );
+        assert_ne!(
+            key,
+            shaped_run_cache_key(
+                terminal_id,
+                3,
+                &run,
+                &font,
+                color,
+                px(14.0),
+                px(8.0),
+                px(18.0),
+            )
+        );
+    }
+
+    #[test]
+    fn retain_terminal_shaped_run_cache_drops_unused_active_terminal_entries() {
+        let active_key = ShapedRunCacheKey {
+            terminal_id: crate::terminal::TerminalId(1),
+            row: 0,
+            x: 0,
+            cells: 1,
+            text: "a".to_string(),
+            color: (0, 0, 0, 0),
+            font_family: "Test Mono".to_string(),
+            font_weight: 400.0f32.to_bits(),
+            font_style: gpui::FontStyle::Normal,
+            font_size: 14.0f32.to_bits(),
+            cell_width: 8.0f32.to_bits(),
+            line_height: 16.0f32.to_bits(),
+        };
+        let unused_active_key = ShapedRunCacheKey {
+            text: "b".to_string(),
+            ..active_key.clone()
+        };
+        let other_terminal_key = ShapedRunCacheKey {
+            terminal_id: crate::terminal::TerminalId(2),
+            ..active_key.clone()
+        };
+
+        SHAPED_RUN_CACHE.with_borrow_mut(|cache| {
+            cache.lines.clear();
+            cache
+                .lines
+                .insert(active_key.clone(), ShapedLine::default());
+            cache
+                .lines
+                .insert(unused_active_key.clone(), ShapedLine::default());
+            cache
+                .lines
+                .insert(other_terminal_key.clone(), ShapedLine::default());
+        });
+
+        retain_terminal_shaped_run_cache(
+            crate::terminal::TerminalId(1),
+            &HashSet::from([active_key.clone()]),
+        );
+
+        SHAPED_RUN_CACHE.with_borrow(|cache| {
+            assert!(cache.lines.contains_key(&active_key));
+            assert!(!cache.lines.contains_key(&unused_active_key));
+            assert!(cache.lines.contains_key(&other_terminal_key));
+        });
     }
 }
