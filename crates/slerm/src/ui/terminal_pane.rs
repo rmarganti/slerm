@@ -547,16 +547,16 @@ fn map_key(key_name: &str) -> Option<key::Key> {
         "x" | "X" => key::Key::X,
         "y" | "Y" => key::Key::Y,
         "z" | "Z" => key::Key::Z,
-        "0" => key::Key::Digit0,
-        "1" => key::Key::Digit1,
-        "2" => key::Key::Digit2,
-        "3" => key::Key::Digit3,
-        "4" => key::Key::Digit4,
-        "5" => key::Key::Digit5,
-        "6" => key::Key::Digit6,
-        "7" => key::Key::Digit7,
-        "8" => key::Key::Digit8,
-        "9" => key::Key::Digit9,
+        "0" | ")" => key::Key::Digit0,
+        "1" | "!" => key::Key::Digit1,
+        "2" | "@" => key::Key::Digit2,
+        "3" | "#" => key::Key::Digit3,
+        "4" | "$" => key::Key::Digit4,
+        "5" | "%" => key::Key::Digit5,
+        "6" | "^" => key::Key::Digit6,
+        "7" | "&" => key::Key::Digit7,
+        "8" | "*" => key::Key::Digit8,
+        "9" | "(" => key::Key::Digit9,
         "-" | "_" | "minus" => key::Key::Minus,
         "=" | "+" | "equal" => key::Key::Equal,
         "[" | "{" | "leftbracket" => key::Key::BracketLeft,
@@ -602,6 +602,16 @@ fn map_key(key_name: &str) -> Option<key::Key> {
 fn unshifted_codepoint(key_name: &str) -> Option<char> {
     Some(match key_name {
         "space" => ' ',
+        ")" => '0',
+        "!" => '1',
+        "@" => '2',
+        "#" => '3',
+        "$" => '4',
+        "%" => '5',
+        "^" => '6',
+        "&" => '7',
+        "*" => '8',
+        "(" => '9',
         "_" => '-',
         "+" => '=',
         "{" => '[',
@@ -810,5 +820,39 @@ mod tests {
         assert_eq!(input.unshifted_codepoint, Some(';'));
         assert_eq!(input.utf8.as_deref(), Some(":"));
         assert!(input.consumed_mods.contains(key::Mods::SHIFT));
+    }
+
+    #[test]
+    fn shifted_digit_punctuation_maps_to_physical_digit_with_unshifted_codepoint() {
+        let cases = [
+            ("!", key::Key::Digit1, '1'),
+            ("@", key::Key::Digit2, '2'),
+            ("#", key::Key::Digit3, '3'),
+            ("$", key::Key::Digit4, '4'),
+            ("%", key::Key::Digit5, '5'),
+            ("^", key::Key::Digit6, '6'),
+            ("&", key::Key::Digit7, '7'),
+            ("*", key::Key::Digit8, '8'),
+            ("(", key::Key::Digit9, '9'),
+            (")", key::Key::Digit0, '0'),
+        ];
+
+        for (character, physical_key, unshifted) in cases {
+            let keystroke = Keystroke {
+                modifiers: gpui::Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+                key: character.into(),
+                key_char: Some(character.into()),
+            };
+
+            let input = key_input_from_keystroke(&keystroke, TerminalKeyAction::Press)
+                .expect("shifted digit punctuation maps to terminal input");
+            assert_eq!(input.key, physical_key);
+            assert_eq!(input.unshifted_codepoint, Some(unshifted));
+            assert_eq!(input.utf8.as_deref(), Some(character));
+            assert!(input.consumed_mods.contains(key::Mods::SHIFT));
+        }
     }
 }
