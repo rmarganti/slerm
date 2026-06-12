@@ -7,5 +7,6 @@ pub mod project_picker;
 pub mod rename_project_modal;
 pub mod root;
 pub mod sidebar;
+pub mod terminal_layout;
 pub mod terminal_pane;
 pub mod text_input;

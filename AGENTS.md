@@ -1,7 +1,7 @@
 Slerm is a manager of terminals and agents.
 
 It is a Rust application built upon GPUI (https://github.com/zed-industries/zed/tree/main/crates/gpui)
-for UI and Libghostty for terminal emulation.
+for UI and Libghostty (https://github.com/Uzaaft/libghostty-rs) for terminal emulation.
 
 ## Key Tenets
 

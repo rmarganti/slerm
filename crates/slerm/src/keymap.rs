@@ -28,7 +28,6 @@ const RENAME_PROJECT_MODAL_CONTEXT: &str = "RenameProjectModal";
 pub fn init(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("cmd-q", Quit, None),
-        KeyBinding::new("ctrl-q", Quit, None),
         KeyBinding::new("cmd-t", OpenAddTerminalPicker, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-shift-n", OpenAddProjectPicker, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-alt-o", OpenProjectPicker, Some(WORKSPACE_CONTEXT)),

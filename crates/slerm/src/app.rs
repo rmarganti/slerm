@@ -1,11 +1,12 @@
 use gpui::{App, AppContext, Application, Bounds, WindowBounds, WindowOptions, px, size};
 
-use crate::{actions, keymap, storage, ui::root::SlermApp};
+use crate::{actions, keymap, storage, terminal, ui::root::SlermApp};
 
 pub fn run() {
     Application::new().run(|cx: &mut App| {
         actions::init(cx);
         keymap::init(cx);
+        terminal::init::init();
 
         let bounds = Bounds::centered(None, size(px(900.0), px(600.0)), cx);
 

@@ -1,8 +1,11 @@
+use std::time::Duration;
+
 use gpui::{
-    Context, Entity, FocusHandle, Focusable, IntoElement, PathPromptOptions, Render, Window, div,
-    prelude::*,
+    AsyncApp, Context, Entity, FocusHandle, Focusable, IntoElement, KeyDownEvent, KeyUpEvent,
+    PathPromptOptions, Render, Task, Timer, WeakEntity, Window, div, prelude::*,
 };
 
+use crate::terminal::surface::TerminalKeyAction;
 use crate::{
     actions::{
         ActiveProjectCycleNext, ActiveProjectCyclePrev, ActiveProjectMoveLeft,
@@ -21,7 +24,7 @@ use crate::{
         project_picker::ProjectPicker,
         rename_project_modal::RenameProjectModal,
         sidebar::Sidebar,
-        terminal_pane::TerminalPane,
+        terminal_pane::{TerminalPane, key_input_from_keystroke},
     },
     workspace::model::WorkspaceState,
 };
@@ -35,17 +38,48 @@ pub struct SlermApp {
     runtime: Entity<TerminalRuntimeService>,
     focus_handle: FocusHandle,
     active_modal: Option<ActiveModal>,
+    _terminal_drain_task: Task<()>,
 }
 
 impl SlermApp {
     pub fn new(workspace: WorkspaceState, cx: &mut Context<Self>) -> Self {
         let runtime = TerminalRuntimeService::from_workspace(&workspace);
+        let workspace = cx.new(|_| workspace);
+        let runtime = cx.new(|_| runtime);
+        let drain_runtime = runtime.clone();
+        let drain_workspace = workspace.clone();
+
+        let terminal_drain_task =
+            cx.spawn(async move |app: WeakEntity<SlermApp>, cx: &mut AsyncApp| {
+                loop {
+                    Timer::after(Duration::from_millis(16)).await;
+                    let active_terminal = match drain_workspace.update(cx, |workspace, _cx| {
+                        workspace
+                            .active_project()
+                            .and_then(|project| project.active_terminal())
+                            .map(|terminal| terminal.id)
+                    }) {
+                        Ok(active_terminal) => active_terminal,
+                        Err(_) => break,
+                    };
+                    let changed = match drain_runtime.update(cx, |runtime, _cx| {
+                        runtime.drain_live_terminals_prioritized(active_terminal)
+                    }) {
+                        Ok(changed) => changed,
+                        Err(_) => break,
+                    };
+                    if changed && app.update(cx, |_app, cx| cx.notify()).is_err() {
+                        break;
+                    }
+                }
+            });
 
         Self {
-            workspace: cx.new(|_| workspace),
-            runtime: cx.new(|_| runtime),
+            workspace,
+            runtime,
             focus_handle: cx.focus_handle(),
             active_modal: None,
+            _terminal_drain_task: terminal_drain_task,
         }
     }
 }
@@ -347,6 +381,72 @@ impl SlermApp {
         });
     }
 
+    fn write_terminal_key_down(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_modal.is_some() {
+            return;
+        }
+        let Some(terminal_id) = self
+            .workspace
+            .read(cx)
+            .active_project()
+            .and_then(|project| project.active_terminal())
+            .map(|terminal| terminal.id)
+        else {
+            return;
+        };
+        let action = if event.is_held {
+            TerminalKeyAction::Repeat
+        } else {
+            TerminalKeyAction::Press
+        };
+        let Some(input) = key_input_from_keystroke(&event.keystroke, action) else {
+            return;
+        };
+        if self
+            .runtime
+            .update(cx, |runtime, _| runtime.write_key_input(terminal_id, input))
+        {
+            cx.stop_propagation();
+            window.refresh();
+        }
+    }
+
+    fn write_terminal_key_up(
+        &mut self,
+        event: &KeyUpEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.active_modal.is_some() {
+            return;
+        }
+        let Some(terminal_id) = self
+            .workspace
+            .read(cx)
+            .active_project()
+            .and_then(|project| project.active_terminal())
+            .map(|terminal| terminal.id)
+        else {
+            return;
+        };
+        let Some(input) = key_input_from_keystroke(&event.keystroke, TerminalKeyAction::Release)
+        else {
+            return;
+        };
+        if self
+            .runtime
+            .update(cx, |runtime, _| runtime.write_key_input(terminal_id, input))
+        {
+            cx.stop_propagation();
+            window.refresh();
+        }
+    }
+
     fn update_workspace<T>(
         &mut self,
         cx: &mut Context<Self>,
@@ -398,6 +498,8 @@ impl Render for SlermApp {
             .on_action(cx.listener(Self::open_add_project_picker))
             .on_action(cx.listener(Self::open_project_picker))
             .on_action(cx.listener(Self::open_rename_project_modal))
+            .on_key_down(cx.listener(Self::write_terminal_key_down))
+            .on_key_up(cx.listener(Self::write_terminal_key_up))
             .size_full()
             .flex()
             .flex_col()
@@ -409,7 +511,10 @@ impl Render for SlermApp {
                     .flex_1()
                     .overflow_hidden()
                     .child(Sidebar::new(self.workspace.clone(), self.runtime.clone()))
-                    .child(TerminalPane::new(self.workspace.clone())),
+                    .child(TerminalPane::new(
+                        self.workspace.clone(),
+                        self.runtime.clone(),
+                    )),
             )
             .child(ProjectBar::new(
                 self.workspace.clone(),
