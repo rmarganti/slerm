@@ -129,7 +129,7 @@ impl Element for TerminalElement {
             }],
             None,
         );
-        let cell_width = probe.width.ceil().max(px(1.0));
+        let cell_width = probe.width.max(px(1.0));
         let cell_height = text_style
             .line_height_in_pixels(window.rem_size())
             .max(px(1.0));
