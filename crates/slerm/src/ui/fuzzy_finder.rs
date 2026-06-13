@@ -1,19 +1,12 @@
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, Render, ScrollHandle, SharedString,
-    Window, actions, div, prelude::*, px,
+    Window, div, prelude::*, px,
 };
 
-use crate::{theme, ui::text_input::TextInput};
-
-actions!(
-    slerm_fuzzy_finder,
-    [
-        FuzzyFinderSelectPrev,
-        FuzzyFinderSelectNext,
-        FuzzyFinderConfirm,
-        FuzzyFinderCancel,
-    ]
-);
+use crate::{
+    theme,
+    ui::{menu, text_input::TextInput},
+};
 
 pub struct FuzzyFinderItem<T> {
     pub title: SharedString,
@@ -106,7 +99,12 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
         self.scroll_selected_item_into_view();
     }
 
-    fn select_prev(&mut self, _: &FuzzyFinderSelectPrev, _: &mut Window, cx: &mut Context<Self>) {
+    fn select_previous(
+        &mut self,
+        _: &menu::SelectPrevious,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if !self.filtered.is_empty() {
             self.selected_index = self
                 .selected_index
@@ -117,7 +115,7 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
         }
     }
 
-    fn select_next(&mut self, _: &FuzzyFinderSelectNext, _: &mut Window, cx: &mut Context<Self>) {
+    fn select_next(&mut self, _: &menu::SelectNext, _: &mut Window, cx: &mut Context<Self>) {
         if !self.filtered.is_empty() {
             self.selected_index = (self.selected_index + 1) % self.filtered.len();
             self.scroll_selected_item_into_view();
@@ -125,7 +123,26 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
         }
     }
 
-    fn confirm(&mut self, _: &FuzzyFinderConfirm, window: &mut Window, cx: &mut Context<Self>) {
+    fn select_first(&mut self, _: &menu::SelectFirst, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.filtered.is_empty() && self.selected_index != 0 {
+            self.selected_index = 0;
+            self.scroll_selected_item_into_view();
+            cx.notify();
+        }
+    }
+
+    fn select_last(&mut self, _: &menu::SelectLast, _: &mut Window, cx: &mut Context<Self>) {
+        if !self.filtered.is_empty() {
+            let last_index = self.filtered.len() - 1;
+            if self.selected_index != last_index {
+                self.selected_index = last_index;
+                self.scroll_selected_item_into_view();
+                cx.notify();
+            }
+        }
+    }
+
+    fn confirm(&mut self, _: &menu::Confirm, window: &mut Window, cx: &mut Context<Self>) {
         let Some(selected) = self.filtered.get(self.selected_index) else {
             return;
         };
@@ -135,7 +152,7 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
         self.on_confirm = on_confirm;
     }
 
-    fn cancel(&mut self, _: &FuzzyFinderCancel, window: &mut Window, cx: &mut Context<Self>) {
+    fn cancel(&mut self, _: &menu::Cancel, window: &mut Window, cx: &mut Context<Self>) {
         let on_cancel = std::mem::replace(&mut self.on_cancel, Box::new(|_, _| {}));
         on_cancel(window, cx);
         self.on_cancel = on_cancel;
@@ -178,8 +195,10 @@ impl<T: Clone + 'static> Render for FuzzyFinder<T> {
         div()
             .key_context("FuzzyFinder")
             .track_focus(&self.focus_handle)
-            .on_action(cx.listener(Self::select_prev))
+            .on_action(cx.listener(Self::select_previous))
             .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::select_first))
+            .on_action(cx.listener(Self::select_last))
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(Self::cancel))
             .w(px(560.0))
