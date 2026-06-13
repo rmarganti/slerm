@@ -1,6 +1,6 @@
 use gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, Render, ScrollHandle, SharedString,
-    Window, div, prelude::*, px,
+    StatefulInteractiveElement, Window, div, prelude::*, px,
 };
 
 use crate::{
@@ -105,44 +105,98 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.filtered.is_empty() {
-            self.selected_index = self
-                .selected_index
-                .checked_sub(1)
-                .unwrap_or(self.filtered.len() - 1);
-            self.scroll_selected_item_into_view();
+        if self.select_previous_match() {
             cx.notify();
         }
     }
 
     fn select_next(&mut self, _: &menu::SelectNext, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.filtered.is_empty() {
-            self.selected_index = (self.selected_index + 1) % self.filtered.len();
-            self.scroll_selected_item_into_view();
+        if self.select_next_match() {
             cx.notify();
         }
     }
 
     fn select_first(&mut self, _: &menu::SelectFirst, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.filtered.is_empty() && self.selected_index != 0 {
-            self.selected_index = 0;
-            self.scroll_selected_item_into_view();
+        if self.select_first_match() {
             cx.notify();
         }
     }
 
     fn select_last(&mut self, _: &menu::SelectLast, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.filtered.is_empty() {
-            let last_index = self.filtered.len() - 1;
-            if self.selected_index != last_index {
-                self.selected_index = last_index;
-                self.scroll_selected_item_into_view();
-                cx.notify();
-            }
+        if self.select_last_match() {
+            cx.notify();
+        }
+    }
+
+    fn select_page_up(&mut self, _: &menu::SelectPageUp, _: &mut Window, cx: &mut Context<Self>) {
+        if self.select_first_match() {
+            cx.notify();
+        }
+    }
+
+    fn select_page_down(
+        &mut self,
+        _: &menu::SelectPageDown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.select_last_match() {
+            cx.notify();
         }
     }
 
     fn confirm(&mut self, _: &menu::Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirm_selected(window, cx);
+    }
+
+    fn cancel(&mut self, _: &menu::Cancel, window: &mut Window, cx: &mut Context<Self>) {
+        let on_cancel = std::mem::replace(&mut self.on_cancel, Box::new(|_, _| {}));
+        on_cancel(window, cx);
+        self.on_cancel = on_cancel;
+    }
+
+    fn select_previous_match(&mut self) -> bool {
+        let Some(selected_index) =
+            previous_selection_index(self.selected_index, self.filtered.len())
+        else {
+            return false;
+        };
+        self.selected_index = selected_index;
+        self.scroll_selected_item_into_view();
+        true
+    }
+
+    fn select_next_match(&mut self) -> bool {
+        let Some(selected_index) = next_selection_index(self.selected_index, self.filtered.len())
+        else {
+            return false;
+        };
+        self.selected_index = selected_index;
+        self.scroll_selected_item_into_view();
+        true
+    }
+
+    fn select_first_match(&mut self) -> bool {
+        self.select_match_at(0)
+    }
+
+    fn select_last_match(&mut self) -> bool {
+        let Some(last_index) = self.filtered.len().checked_sub(1) else {
+            return false;
+        };
+        self.select_match_at(last_index)
+    }
+
+    fn select_match_at(&mut self, index: usize) -> bool {
+        if index >= self.filtered.len() || self.selected_index == index {
+            return false;
+        }
+        self.selected_index = index;
+        self.scroll_selected_item_into_view();
+        true
+    }
+
+    fn confirm_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(selected) = self.filtered.get(self.selected_index) else {
             return;
         };
@@ -150,12 +204,6 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
         let on_confirm = std::mem::replace(&mut self.on_confirm, Box::new(|_, _, _| {}));
         on_confirm(payload, window, cx);
         self.on_confirm = on_confirm;
-    }
-
-    fn cancel(&mut self, _: &menu::Cancel, window: &mut Window, cx: &mut Context<Self>) {
-        let on_cancel = std::mem::replace(&mut self.on_cancel, Box::new(|_, _| {}));
-        on_cancel(window, cx);
-        self.on_cancel = on_cancel;
     }
 
     fn focus_input(&self, window: &mut Window, cx: &mut App) {
@@ -199,6 +247,8 @@ impl<T: Clone + 'static> Render for FuzzyFinder<T> {
             .on_action(cx.listener(Self::select_next))
             .on_action(cx.listener(Self::select_first))
             .on_action(cx.listener(Self::select_last))
+            .on_action(cx.listener(Self::select_page_up))
+            .on_action(cx.listener(Self::select_page_down))
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(Self::cancel))
             .w(px(560.0))
@@ -233,6 +283,7 @@ impl<T: Clone + 'static> Render for FuzzyFinder<T> {
                             .map(|(index, matched)| {
                                 let item = &self.items[matched.item_index];
                                 div()
+                                    .id(("fuzzy-finder-row", index))
                                     .px_2()
                                     .py_1()
                                     .rounded_xs()
@@ -241,6 +292,15 @@ impl<T: Clone + 'static> Render for FuzzyFinder<T> {
                                     } else {
                                         theme.float_bg
                                     })
+                                    .on_hover(cx.listener(move |finder, hovered: &bool, _, cx| {
+                                        if *hovered && finder.select_match_at(index) {
+                                            cx.notify();
+                                        }
+                                    }))
+                                    .on_click(cx.listener(move |finder, _event, window, cx| {
+                                        finder.select_match_at(index);
+                                        finder.confirm_selected(window, cx);
+                                    }))
                                     .child(div().text_color(theme.fg).child(item.title.clone()))
                                     .when_some(item.subtitle.clone(), |row, subtitle| {
                                         row.child(
@@ -256,6 +316,20 @@ impl<T: Clone + 'static> Render for FuzzyFinder<T> {
                     }),
             )
     }
+}
+
+fn previous_selection_index(selected_index: usize, len: usize) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    Some(selected_index.checked_sub(1).unwrap_or(len - 1))
+}
+
+fn next_selection_index(selected_index: usize, len: usize) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    Some((selected_index + 1) % len)
 }
 
 fn fuzzy_item_score<T>(query: &str, item: &FuzzyFinderItem<T>) -> Option<i64> {
@@ -311,7 +385,10 @@ fn fuzzy_score(query: &str, candidate: &str) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FuzzyFinderItem, fuzzy_item_score, fuzzy_score};
+    use super::{
+        FuzzyFinderItem, fuzzy_item_score, fuzzy_score, next_selection_index,
+        previous_selection_index,
+    };
 
     #[test]
     fn fuzzy_score_matches_subsequences() {
@@ -327,5 +404,15 @@ mod tests {
         assert!(fuzzy_item_score("code", &item).is_some());
         assert!(fuzzy_item_score("rm/sl", &item).is_some());
         assert!(fuzzy_item_score("zed", &item).is_none());
+    }
+
+    #[test]
+    fn selection_navigation_wraps_and_ignores_empty_results() {
+        assert_eq!(previous_selection_index(0, 0), None);
+        assert_eq!(next_selection_index(0, 0), None);
+        assert_eq!(previous_selection_index(0, 3), Some(2));
+        assert_eq!(previous_selection_index(2, 3), Some(1));
+        assert_eq!(next_selection_index(2, 3), Some(0));
+        assert_eq!(next_selection_index(0, 3), Some(1));
     }
 }

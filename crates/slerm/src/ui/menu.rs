@@ -7,6 +7,8 @@ actions!(
         SelectNext,
         SelectFirst,
         SelectLast,
+        SelectPageUp,
+        SelectPageDown,
         Confirm,
         Cancel,
     ]

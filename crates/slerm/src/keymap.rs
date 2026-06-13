@@ -135,8 +135,20 @@ fn picker_bindings() -> Vec<KeyBinding> {
     vec![
         KeyBinding::new("up", menu::SelectPrevious, Some(FUZZY_FINDER_CONTEXT)),
         KeyBinding::new("ctrl-p", menu::SelectPrevious, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new(
+            "shift-tab",
+            menu::SelectPrevious,
+            Some(FUZZY_FINDER_CONTEXT),
+        ),
         KeyBinding::new("down", menu::SelectNext, Some(FUZZY_FINDER_CONTEXT)),
         KeyBinding::new("ctrl-n", menu::SelectNext, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("tab", menu::SelectNext, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("home", menu::SelectFirst, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("cmd-up", menu::SelectFirst, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("pageup", menu::SelectPageUp, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("end", menu::SelectLast, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("cmd-down", menu::SelectLast, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("pagedown", menu::SelectPageDown, Some(FUZZY_FINDER_CONTEXT)),
         KeyBinding::new("enter", menu::Confirm, Some(FUZZY_FINDER_CONTEXT)),
         KeyBinding::new("escape", menu::Cancel, Some(FUZZY_FINDER_CONTEXT)),
     ]
