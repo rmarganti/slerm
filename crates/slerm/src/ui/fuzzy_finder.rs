@@ -1,6 +1,6 @@
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, IntoElement, Render, SharedString, Window,
-    actions, div, prelude::*, px,
+    App, Context, Entity, FocusHandle, Focusable, IntoElement, Render, ScrollHandle, SharedString,
+    Window, actions, div, prelude::*, px,
 };
 
 use crate::{theme, ui::text_input::TextInput};
@@ -48,6 +48,7 @@ pub struct FuzzyFinder<T: Clone + 'static> {
     items: Vec<FuzzyFinderItem<T>>,
     filtered: Vec<FuzzyMatch>,
     selected_index: usize,
+    scroll_handle: ScrollHandle,
     input: Entity<TextInput>,
     focus_handle: FocusHandle,
     on_confirm: Box<ConfirmHandler<T>>,
@@ -75,6 +76,7 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
             items,
             filtered: Vec::new(),
             selected_index: 0,
+            scroll_handle: ScrollHandle::new(),
             input,
             focus_handle: cx.focus_handle(),
             on_confirm: Box::new(on_confirm),
@@ -100,11 +102,8 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
                 .then_with(|| a.item_index.cmp(&b.item_index))
         });
         self.filtered = matches;
-        if self.filtered.is_empty() {
-            self.selected_index = 0;
-        } else {
-            self.selected_index = self.selected_index.min(self.filtered.len() - 1);
-        }
+        self.selected_index = 0;
+        self.scroll_selected_item_into_view();
     }
 
     fn select_prev(&mut self, _: &FuzzyFinderSelectPrev, _: &mut Window, cx: &mut Context<Self>) {
@@ -113,6 +112,7 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
                 .selected_index
                 .checked_sub(1)
                 .unwrap_or(self.filtered.len() - 1);
+            self.scroll_selected_item_into_view();
             cx.notify();
         }
     }
@@ -120,6 +120,7 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
     fn select_next(&mut self, _: &FuzzyFinderSelectNext, _: &mut Window, cx: &mut Context<Self>) {
         if !self.filtered.is_empty() {
             self.selected_index = (self.selected_index + 1) % self.filtered.len();
+            self.scroll_selected_item_into_view();
             cx.notify();
         }
     }
@@ -142,6 +143,12 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
 
     fn focus_input(&self, window: &mut Window, cx: &mut App) {
         self.input.read(cx).focus_handle(cx).focus(window);
+    }
+
+    fn scroll_selected_item_into_view(&self) {
+        if !self.filtered.is_empty() {
+            self.scroll_handle.scroll_to_item(self.selected_index);
+        }
     }
 }
 
@@ -184,11 +191,13 @@ impl<T: Clone + 'static> Render for FuzzyFinder<T> {
             .child(self.input.clone())
             .child(
                 div()
+                    .id("fuzzy-finder-results")
                     .border_t_1()
                     .border_color(theme.border)
                     .p_1()
                     .max_h(px(260.0))
-                    .overflow_hidden()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll_handle)
                     .children(if self.filtered.is_empty() {
                         vec![
                             div()
