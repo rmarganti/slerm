@@ -9,13 +9,16 @@ use crate::{
         OpenProjectPicker, OpenRenameProjectModal, Quit,
     },
     ui::{
-        fuzzy_finder::{
-            FuzzyFinderCancel, FuzzyFinderConfirm, FuzzyFinderSelectNext, FuzzyFinderSelectPrev,
-        },
+        menu,
         rename_project_modal::{RenameProjectCancel, RenameProjectConfirm},
         text_input::{
-            TextInputBackspace, TextInputDelete, TextInputMoveLeft, TextInputMoveRight,
-            TextInputMoveToEnd, TextInputMoveToStart, TextInputPaste,
+            TextInputBackspace, TextInputCopy, TextInputCut, TextInputDelete,
+            TextInputDeleteNextWord, TextInputDeletePreviousWord, TextInputDeleteToEnd,
+            TextInputDeleteToStart, TextInputMoveLeft, TextInputMoveLeftSelecting,
+            TextInputMoveRight, TextInputMoveRightSelecting, TextInputMoveToEnd,
+            TextInputMoveToEndSelecting, TextInputMoveToStart, TextInputMoveToStartSelecting,
+            TextInputMoveWordLeft, TextInputMoveWordLeftSelecting, TextInputMoveWordRight,
+            TextInputMoveWordRightSelecting, TextInputPaste, TextInputSelectAll,
         },
     },
 };
@@ -26,7 +29,14 @@ const FUZZY_FINDER_CONTEXT: &str = "FuzzyFinder";
 const RENAME_PROJECT_MODAL_CONTEXT: &str = "RenameProjectModal";
 
 pub fn init(cx: &mut App) {
-    cx.bind_keys([
+    cx.bind_keys(workspace_bindings());
+    cx.bind_keys(text_input_bindings());
+    cx.bind_keys(picker_bindings());
+    cx.bind_keys(rename_project_modal_bindings());
+}
+
+fn workspace_bindings() -> Vec<KeyBinding> {
+    let mut bindings = vec![
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-t", OpenAddTerminalPicker, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-shift-n", OpenAddProjectPicker, Some(WORKSPACE_CONTEXT)),
@@ -42,51 +52,24 @@ pub fn init(cx: &mut App) {
         KeyBinding::new("cmd-j", ActiveTerminalCycleNext, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-up", ActiveTerminalCyclePrev, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-k", ActiveTerminalCyclePrev, Some(WORKSPACE_CONTEXT)),
-        KeyBinding::new(
-            "cmd-1",
-            ActiveTerminalSelectByIndex { index: 0 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
-            "cmd-2",
-            ActiveTerminalSelectByIndex { index: 1 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
-            "cmd-3",
-            ActiveTerminalSelectByIndex { index: 2 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
-            "cmd-4",
-            ActiveTerminalSelectByIndex { index: 3 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
-            "cmd-5",
-            ActiveTerminalSelectByIndex { index: 4 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
-            "cmd-6",
-            ActiveTerminalSelectByIndex { index: 5 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
-            "cmd-7",
-            ActiveTerminalSelectByIndex { index: 6 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
-            "cmd-8",
-            ActiveTerminalSelectByIndex { index: 7 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
-            "cmd-9",
-            ActiveTerminalSelectByIndex { index: 8 },
-            Some(WORKSPACE_CONTEXT),
-        ),
+    ];
+
+    bindings.extend(
+        [
+            "cmd-1", "cmd-2", "cmd-3", "cmd-4", "cmd-5", "cmd-6", "cmd-7", "cmd-8", "cmd-9",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, keystroke)| {
+            KeyBinding::new(
+                keystroke,
+                ActiveTerminalSelectByIndex { index },
+                Some(WORKSPACE_CONTEXT),
+            )
+        }),
+    );
+
+    bindings.extend([
         KeyBinding::new("cmd-right", ActiveProjectCycleNext, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-l", ActiveProjectCycleNext, Some(WORKSPACE_CONTEXT)),
         KeyBinding::new("cmd-left", ActiveProjectCyclePrev, Some(WORKSPACE_CONTEXT)),
@@ -107,70 +90,139 @@ pub fn init(cx: &mut App) {
             ActiveProjectMoveRight,
             Some(WORKSPACE_CONTEXT),
         ),
-        KeyBinding::new(
+    ]);
+
+    bindings.extend(
+        [
             "cmd-ctrl-1",
-            ActiveProjectSelectByIndex { index: 0 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
             "cmd-ctrl-2",
-            ActiveProjectSelectByIndex { index: 1 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
             "cmd-ctrl-3",
-            ActiveProjectSelectByIndex { index: 2 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
             "cmd-ctrl-4",
-            ActiveProjectSelectByIndex { index: 3 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
             "cmd-ctrl-5",
-            ActiveProjectSelectByIndex { index: 4 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
             "cmd-ctrl-6",
-            ActiveProjectSelectByIndex { index: 5 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
             "cmd-ctrl-7",
-            ActiveProjectSelectByIndex { index: 6 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
             "cmd-ctrl-8",
-            ActiveProjectSelectByIndex { index: 7 },
-            Some(WORKSPACE_CONTEXT),
-        ),
-        KeyBinding::new(
             "cmd-ctrl-9",
-            ActiveProjectSelectByIndex { index: 8 },
-            Some(WORKSPACE_CONTEXT),
-        ),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, keystroke)| {
+            KeyBinding::new(
+                keystroke,
+                ActiveProjectSelectByIndex { index },
+                Some(WORKSPACE_CONTEXT),
+            )
+        }),
+    );
+
+    bindings
+}
+
+fn text_input_bindings() -> Vec<KeyBinding> {
+    vec![
         KeyBinding::new("left", TextInputMoveLeft, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("ctrl-b", TextInputMoveLeft, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new(
+            "shift-left",
+            TextInputMoveLeftSelecting,
+            Some(TEXT_INPUT_CONTEXT),
+        ),
         KeyBinding::new("right", TextInputMoveRight, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("ctrl-f", TextInputMoveRight, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new(
+            "shift-right",
+            TextInputMoveRightSelecting,
+            Some(TEXT_INPUT_CONTEXT),
+        ),
         KeyBinding::new("cmd-left", TextInputMoveToStart, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("ctrl-a", TextInputMoveToStart, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new(
+            "cmd-shift-left",
+            TextInputMoveToStartSelecting,
+            Some(TEXT_INPUT_CONTEXT),
+        ),
         KeyBinding::new("cmd-right", TextInputMoveToEnd, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("ctrl-e", TextInputMoveToEnd, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new(
+            "cmd-shift-right",
+            TextInputMoveToEndSelecting,
+            Some(TEXT_INPUT_CONTEXT),
+        ),
+        KeyBinding::new("alt-left", TextInputMoveWordLeft, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new(
+            "alt-shift-left",
+            TextInputMoveWordLeftSelecting,
+            Some(TEXT_INPUT_CONTEXT),
+        ),
+        KeyBinding::new(
+            "alt-right",
+            TextInputMoveWordRight,
+            Some(TEXT_INPUT_CONTEXT),
+        ),
+        KeyBinding::new(
+            "alt-shift-right",
+            TextInputMoveWordRightSelecting,
+            Some(TEXT_INPUT_CONTEXT),
+        ),
         KeyBinding::new("backspace", TextInputBackspace, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("ctrl-h", TextInputBackspace, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("delete", TextInputDelete, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("ctrl-d", TextInputDelete, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new(
+            "alt-backspace",
+            TextInputDeletePreviousWord,
+            Some(TEXT_INPUT_CONTEXT),
+        ),
+        KeyBinding::new(
+            "ctrl-w",
+            TextInputDeletePreviousWord,
+            Some(TEXT_INPUT_CONTEXT),
+        ),
+        KeyBinding::new(
+            "alt-delete",
+            TextInputDeleteNextWord,
+            Some(TEXT_INPUT_CONTEXT),
+        ),
+        KeyBinding::new(
+            "cmd-backspace",
+            TextInputDeleteToStart,
+            Some(TEXT_INPUT_CONTEXT),
+        ),
+        KeyBinding::new("ctrl-u", TextInputDeleteToStart, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new("cmd-delete", TextInputDeleteToEnd, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new("ctrl-k", TextInputDeleteToEnd, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new("cmd-a", TextInputSelectAll, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new("cmd-c", TextInputCopy, Some(TEXT_INPUT_CONTEXT)),
+        KeyBinding::new("cmd-x", TextInputCut, Some(TEXT_INPUT_CONTEXT)),
         KeyBinding::new("cmd-v", TextInputPaste, Some(TEXT_INPUT_CONTEXT)),
-        KeyBinding::new("up", FuzzyFinderSelectPrev, Some(FUZZY_FINDER_CONTEXT)),
-        KeyBinding::new("ctrl-p", FuzzyFinderSelectPrev, Some(FUZZY_FINDER_CONTEXT)),
-        KeyBinding::new("down", FuzzyFinderSelectNext, Some(FUZZY_FINDER_CONTEXT)),
-        KeyBinding::new("ctrl-n", FuzzyFinderSelectNext, Some(FUZZY_FINDER_CONTEXT)),
-        KeyBinding::new("enter", FuzzyFinderConfirm, Some(FUZZY_FINDER_CONTEXT)),
-        KeyBinding::new("escape", FuzzyFinderCancel, Some(FUZZY_FINDER_CONTEXT)),
+    ]
+}
+
+fn picker_bindings() -> Vec<KeyBinding> {
+    vec![
+        KeyBinding::new("up", menu::SelectPrevious, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("ctrl-p", menu::SelectPrevious, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new(
+            "shift-tab",
+            menu::SelectPrevious,
+            Some(FUZZY_FINDER_CONTEXT),
+        ),
+        KeyBinding::new("down", menu::SelectNext, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("ctrl-n", menu::SelectNext, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("tab", menu::SelectNext, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("home", menu::SelectFirst, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("cmd-up", menu::SelectFirst, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("pageup", menu::SelectPageUp, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("end", menu::SelectLast, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("cmd-down", menu::SelectLast, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("pagedown", menu::SelectPageDown, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("enter", menu::Confirm, Some(FUZZY_FINDER_CONTEXT)),
+        KeyBinding::new("escape", menu::Cancel, Some(FUZZY_FINDER_CONTEXT)),
+    ]
+}
+
+fn rename_project_modal_bindings() -> Vec<KeyBinding> {
+    vec![
         KeyBinding::new(
             "enter",
             RenameProjectConfirm,
@@ -181,5 +233,5 @@ pub fn init(cx: &mut App) {
             RenameProjectCancel,
             Some(RENAME_PROJECT_MODAL_CONTEXT),
         ),
-    ]);
+    ]
 }

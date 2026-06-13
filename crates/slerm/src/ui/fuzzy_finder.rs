@@ -1,19 +1,12 @@
 use gpui::{
-    App, Context, Entity, FocusHandle, Focusable, IntoElement, Render, SharedString, Window,
-    actions, div, prelude::*, px,
+    App, Context, Entity, FocusHandle, Focusable, IntoElement, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement, Window, div, prelude::*, px,
 };
 
-use crate::{theme, ui::text_input::TextInput};
-
-actions!(
-    slerm_fuzzy_finder,
-    [
-        FuzzyFinderSelectPrev,
-        FuzzyFinderSelectNext,
-        FuzzyFinderConfirm,
-        FuzzyFinderCancel,
-    ]
-);
+use crate::{
+    theme,
+    ui::{menu, text_input::TextInput},
+};
 
 pub struct FuzzyFinderItem<T> {
     pub title: SharedString,
@@ -48,6 +41,7 @@ pub struct FuzzyFinder<T: Clone + 'static> {
     items: Vec<FuzzyFinderItem<T>>,
     filtered: Vec<FuzzyMatch>,
     selected_index: usize,
+    scroll_handle: ScrollHandle,
     input: Entity<TextInput>,
     focus_handle: FocusHandle,
     on_confirm: Box<ConfirmHandler<T>>,
@@ -75,6 +69,7 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
             items,
             filtered: Vec::new(),
             selected_index: 0,
+            scroll_handle: ScrollHandle::new(),
             input,
             focus_handle: cx.focus_handle(),
             on_confirm: Box::new(on_confirm),
@@ -100,31 +95,112 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
                 .then_with(|| a.item_index.cmp(&b.item_index))
         });
         self.filtered = matches;
-        if self.filtered.is_empty() {
-            self.selected_index = 0;
-        } else {
-            self.selected_index = self.selected_index.min(self.filtered.len() - 1);
-        }
+        self.selected_index = 0;
+        self.scroll_selected_item_into_view();
     }
 
-    fn select_prev(&mut self, _: &FuzzyFinderSelectPrev, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.filtered.is_empty() {
-            self.selected_index = self
-                .selected_index
-                .checked_sub(1)
-                .unwrap_or(self.filtered.len() - 1);
+    fn select_previous(
+        &mut self,
+        _: &menu::SelectPrevious,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.select_previous_match() {
             cx.notify();
         }
     }
 
-    fn select_next(&mut self, _: &FuzzyFinderSelectNext, _: &mut Window, cx: &mut Context<Self>) {
-        if !self.filtered.is_empty() {
-            self.selected_index = (self.selected_index + 1) % self.filtered.len();
+    fn select_next(&mut self, _: &menu::SelectNext, _: &mut Window, cx: &mut Context<Self>) {
+        if self.select_next_match() {
             cx.notify();
         }
     }
 
-    fn confirm(&mut self, _: &FuzzyFinderConfirm, window: &mut Window, cx: &mut Context<Self>) {
+    fn select_first(&mut self, _: &menu::SelectFirst, _: &mut Window, cx: &mut Context<Self>) {
+        if self.select_first_match() {
+            cx.notify();
+        }
+    }
+
+    fn select_last(&mut self, _: &menu::SelectLast, _: &mut Window, cx: &mut Context<Self>) {
+        if self.select_last_match() {
+            cx.notify();
+        }
+    }
+
+    fn select_page_up(&mut self, _: &menu::SelectPageUp, _: &mut Window, cx: &mut Context<Self>) {
+        // The picker is compact and does not maintain a page-size model, so page
+        // navigation intentionally jumps to the boundary of the result set.
+        if self.select_first_match() {
+            cx.notify();
+        }
+    }
+
+    fn select_page_down(
+        &mut self,
+        _: &menu::SelectPageDown,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        // See select_page_up: with this compact picker, page-down means jump to the
+        // bottom of the current result set.
+        if self.select_last_match() {
+            cx.notify();
+        }
+    }
+
+    fn confirm(&mut self, _: &menu::Confirm, window: &mut Window, cx: &mut Context<Self>) {
+        self.confirm_selected(window, cx);
+    }
+
+    fn cancel(&mut self, _: &menu::Cancel, window: &mut Window, cx: &mut Context<Self>) {
+        let on_cancel = std::mem::replace(&mut self.on_cancel, Box::new(|_, _| {}));
+        on_cancel(window, cx);
+        self.on_cancel = on_cancel;
+    }
+
+    fn select_previous_match(&mut self) -> bool {
+        let Some(selected_index) =
+            previous_selection_index(self.selected_index, self.filtered.len())
+        else {
+            return false;
+        };
+        self.selected_index = selected_index;
+        self.scroll_selected_item_into_view();
+        true
+    }
+
+    fn select_next_match(&mut self) -> bool {
+        let Some(selected_index) = next_selection_index(self.selected_index, self.filtered.len())
+        else {
+            return false;
+        };
+        self.selected_index = selected_index;
+        self.scroll_selected_item_into_view();
+        true
+    }
+
+    fn select_first_match(&mut self) -> bool {
+        self.select_match_at(0)
+    }
+
+    fn select_last_match(&mut self) -> bool {
+        let Some(last_index) = self.filtered.len().checked_sub(1) else {
+            return false;
+        };
+        self.select_match_at(last_index)
+    }
+
+    fn select_match_at(&mut self, index: usize) -> bool {
+        if index >= self.filtered.len() || self.selected_index == index {
+            return false;
+        }
+        self.selected_index = index;
+        self.scroll_selected_item_into_view();
+        true
+    }
+
+    fn confirm_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(selected) = self.filtered.get(self.selected_index) else {
             return;
         };
@@ -134,14 +210,14 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
         self.on_confirm = on_confirm;
     }
 
-    fn cancel(&mut self, _: &FuzzyFinderCancel, window: &mut Window, cx: &mut Context<Self>) {
-        let on_cancel = std::mem::replace(&mut self.on_cancel, Box::new(|_, _| {}));
-        on_cancel(window, cx);
-        self.on_cancel = on_cancel;
-    }
-
     fn focus_input(&self, window: &mut Window, cx: &mut App) {
         self.input.read(cx).focus_handle(cx).focus(window);
+    }
+
+    fn scroll_selected_item_into_view(&self) {
+        if !self.filtered.is_empty() {
+            self.scroll_handle.scroll_to_item(self.selected_index);
+        }
     }
 }
 
@@ -171,8 +247,12 @@ impl<T: Clone + 'static> Render for FuzzyFinder<T> {
         div()
             .key_context("FuzzyFinder")
             .track_focus(&self.focus_handle)
-            .on_action(cx.listener(Self::select_prev))
+            .on_action(cx.listener(Self::select_previous))
             .on_action(cx.listener(Self::select_next))
+            .on_action(cx.listener(Self::select_first))
+            .on_action(cx.listener(Self::select_last))
+            .on_action(cx.listener(Self::select_page_up))
+            .on_action(cx.listener(Self::select_page_down))
             .on_action(cx.listener(Self::confirm))
             .on_action(cx.listener(Self::cancel))
             .w(px(560.0))
@@ -184,11 +264,13 @@ impl<T: Clone + 'static> Render for FuzzyFinder<T> {
             .child(self.input.clone())
             .child(
                 div()
+                    .id("fuzzy-finder-results")
                     .border_t_1()
                     .border_color(theme.border)
                     .p_1()
                     .max_h(px(260.0))
-                    .overflow_hidden()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll_handle)
                     .children(if self.filtered.is_empty() {
                         vec![
                             div()
@@ -205,6 +287,7 @@ impl<T: Clone + 'static> Render for FuzzyFinder<T> {
                             .map(|(index, matched)| {
                                 let item = &self.items[matched.item_index];
                                 div()
+                                    .id(("fuzzy-finder-row", index))
                                     .px_2()
                                     .py_1()
                                     .rounded_xs()
@@ -213,6 +296,15 @@ impl<T: Clone + 'static> Render for FuzzyFinder<T> {
                                     } else {
                                         theme.float_bg
                                     })
+                                    .on_hover(cx.listener(move |finder, hovered: &bool, _, cx| {
+                                        if *hovered && finder.select_match_at(index) {
+                                            cx.notify();
+                                        }
+                                    }))
+                                    .on_click(cx.listener(move |finder, _event, window, cx| {
+                                        finder.select_match_at(index);
+                                        finder.confirm_selected(window, cx);
+                                    }))
                                     .child(div().text_color(theme.fg).child(item.title.clone()))
                                     .when_some(item.subtitle.clone(), |row, subtitle| {
                                         row.child(
@@ -228,6 +320,20 @@ impl<T: Clone + 'static> Render for FuzzyFinder<T> {
                     }),
             )
     }
+}
+
+fn previous_selection_index(selected_index: usize, len: usize) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    Some(selected_index.checked_sub(1).unwrap_or(len - 1))
+}
+
+fn next_selection_index(selected_index: usize, len: usize) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    Some((selected_index + 1) % len)
 }
 
 fn fuzzy_item_score<T>(query: &str, item: &FuzzyFinderItem<T>) -> Option<i64> {
@@ -283,7 +389,10 @@ fn fuzzy_score(query: &str, candidate: &str) -> Option<i64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FuzzyFinderItem, fuzzy_item_score, fuzzy_score};
+    use super::{
+        FuzzyFinderItem, fuzzy_item_score, fuzzy_score, next_selection_index,
+        previous_selection_index,
+    };
 
     #[test]
     fn fuzzy_score_matches_subsequences() {
@@ -299,5 +408,15 @@ mod tests {
         assert!(fuzzy_item_score("code", &item).is_some());
         assert!(fuzzy_item_score("rm/sl", &item).is_some());
         assert!(fuzzy_item_score("zed", &item).is_none());
+    }
+
+    #[test]
+    fn selection_navigation_wraps_and_ignores_empty_results() {
+        assert_eq!(previous_selection_index(0, 0), None);
+        assert_eq!(next_selection_index(0, 0), None);
+        assert_eq!(previous_selection_index(0, 3), Some(2));
+        assert_eq!(previous_selection_index(2, 3), Some(1));
+        assert_eq!(next_selection_index(2, 3), Some(0));
+        assert_eq!(next_selection_index(0, 3), Some(1));
     }
 }
