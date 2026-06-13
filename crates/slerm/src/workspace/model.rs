@@ -197,6 +197,26 @@ impl WorkspaceState {
         Some(terminal)
     }
 
+    pub fn add_agent_to_active_project(&mut self, kind: AgentKind) -> Option<TerminalSpec> {
+        let active_project = self.active_project?;
+        let next_id = self.next_terminal_id();
+        let project = self
+            .projects
+            .iter_mut()
+            .find(|project| project.id == active_project)?;
+
+        let terminal = TerminalSpec::new(
+            next_id.0,
+            project.id,
+            TerminalExtensionSpec::Agent(AgentSpec::new(kind.clone())),
+            kind.display_name(),
+            project.path.clone(),
+            ProcessSpec::new(kind.command_name(), [] as [&str; 0]),
+        );
+        project.add_terminal(terminal.clone());
+        Some(terminal)
+    }
+
     pub fn select_active_project_by_id(&mut self, project_id: ProjectId) -> bool {
         if self.projects.iter().any(|project| project.id == project_id) {
             self.active_project = Some(project_id);
@@ -461,6 +481,50 @@ mod tests {
 
         assert_eq!(project.name, "Untitled Project");
         assert_eq!(workspace.active_project, Some(ProjectId(1)));
+    }
+
+    #[test]
+    fn add_agent_to_active_project_uses_agent_launch_spec_and_selects_it() {
+        for (kind, title, command) in [
+            (AgentKind::Pi, "Pi Coding Agent", "pi"),
+            (AgentKind::OpenCode, "OpenCode", "opencode"),
+            (AgentKind::Gemini, "Gemini", "gemini"),
+            (AgentKind::Codex, "Codex", "codex"),
+        ] {
+            let mut workspace = workspace_with_three_projects();
+
+            let terminal = workspace
+                .add_agent_to_active_project(kind.clone())
+                .expect("active project should accept an agent");
+
+            assert_eq!(terminal.id, TerminalId(13));
+            assert_eq!(terminal.project_id, ProjectId(9));
+            assert_eq!(
+                terminal.extension,
+                TerminalExtensionSpec::Agent(AgentSpec::new(kind))
+            );
+            assert_eq!(terminal.title, title);
+            assert_eq!(terminal.cwd, PathBuf::from("/tmp/second"));
+            assert_eq!(terminal.command, ProcessSpec::new(command, [] as [&str; 0]));
+            assert_eq!(
+                workspace
+                    .active_project()
+                    .and_then(|project| project.active_terminal),
+                Some(TerminalId(13))
+            );
+        }
+    }
+
+    #[test]
+    fn add_agent_to_active_project_returns_none_without_active_project() {
+        let mut workspace = workspace_with_three_projects();
+        workspace.active_project = None;
+
+        assert!(
+            workspace
+                .add_agent_to_active_project(AgentKind::Pi)
+                .is_none()
+        );
     }
 
     #[test]

@@ -23,9 +23,32 @@ impl AgentSpec {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum AgentKind {
     Codex,
+    Gemini,
     OpenCode,
     Pi,
     Custom(String),
+}
+
+impl AgentKind {
+    pub fn display_name(&self) -> &str {
+        match self {
+            Self::Codex => "Codex",
+            Self::Gemini => "Gemini",
+            Self::OpenCode => "OpenCode",
+            Self::Pi => "Pi Coding Agent",
+            Self::Custom(name) => name,
+        }
+    }
+
+    pub fn command_name(&self) -> &str {
+        match self {
+            Self::Codex => "codex",
+            Self::Gemini => "gemini",
+            Self::OpenCode => "opencode",
+            Self::Pi => "pi",
+            Self::Custom(name) => name,
+        }
+    }
 }
 
 /// Persisted hints for deriving an agent's live status from terminal output.
