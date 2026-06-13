@@ -27,6 +27,16 @@ actions!(
         TextInputCut,
         TextInputMoveLeftSelecting,
         TextInputMoveRightSelecting,
+        TextInputMoveToStartSelecting,
+        TextInputMoveToEndSelecting,
+        TextInputMoveWordLeft,
+        TextInputMoveWordRight,
+        TextInputMoveWordLeftSelecting,
+        TextInputMoveWordRightSelecting,
+        TextInputDeletePreviousWord,
+        TextInputDeleteNextWord,
+        TextInputDeleteToStart,
+        TextInputDeleteToEnd,
     ]
 );
 
@@ -169,6 +179,126 @@ impl TextInput {
     ) {
         self.move_cursor_right(true);
         cx.notify();
+    }
+
+    fn move_to_start_selecting(
+        &mut self,
+        _: &TextInputMoveToStartSelecting,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor_to(0, true);
+        cx.notify();
+    }
+
+    fn move_to_end_selecting(
+        &mut self,
+        _: &TextInputMoveToEndSelecting,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor_to(self.text.len(), true);
+        cx.notify();
+    }
+
+    fn move_word_left(
+        &mut self,
+        _: &TextInputMoveWordLeft,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor_to(Self::previous_word_boundary(&self.text, self.cursor), false);
+        cx.notify();
+    }
+
+    fn move_word_right(
+        &mut self,
+        _: &TextInputMoveWordRight,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor_to(Self::next_word_boundary(&self.text, self.cursor), false);
+        cx.notify();
+    }
+
+    fn move_word_left_selecting(
+        &mut self,
+        _: &TextInputMoveWordLeftSelecting,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor_to(Self::previous_word_boundary(&self.text, self.cursor), true);
+        cx.notify();
+    }
+
+    fn move_word_right_selecting(
+        &mut self,
+        _: &TextInputMoveWordRightSelecting,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor_to(Self::next_word_boundary(&self.text, self.cursor), true);
+        cx.notify();
+    }
+
+    fn delete_previous_word(
+        &mut self,
+        _: &TextInputDeletePreviousWord,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(range) = self.selected_range() {
+            self.replace_range(range, "", window, cx);
+            return;
+        }
+
+        let previous = Self::previous_word_boundary(&self.text, self.cursor);
+        if previous != self.cursor {
+            self.replace_range(previous..self.cursor, "", window, cx);
+        }
+    }
+
+    fn delete_next_word(
+        &mut self,
+        _: &TextInputDeleteNextWord,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(range) = self.selected_range() {
+            self.replace_range(range, "", window, cx);
+            return;
+        }
+
+        let next = Self::next_word_boundary(&self.text, self.cursor);
+        if next != self.cursor {
+            self.replace_range(self.cursor..next, "", window, cx);
+        }
+    }
+
+    fn delete_to_start(
+        &mut self,
+        _: &TextInputDeleteToStart,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(range) = self.selected_range() {
+            self.replace_range(range, "", window, cx);
+        } else if self.cursor != 0 {
+            self.replace_range(0..self.cursor, "", window, cx);
+        }
+    }
+
+    fn delete_to_end(
+        &mut self,
+        _: &TextInputDeleteToEnd,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(range) = self.selected_range() {
+            self.replace_range(range, "", window, cx);
+        } else if self.cursor != self.text.len() {
+            self.replace_range(self.cursor..self.text.len(), "", window, cx);
+        }
     }
 
     fn replace_range(
@@ -370,6 +500,66 @@ impl TextInput {
 
         let max_offset = (line_width - visible_width).max(px(0.0));
         offset.min(max_offset)
+    }
+
+    fn previous_word_boundary(text: &str, offset: usize) -> usize {
+        debug_assert!(text.is_char_boundary(offset));
+        let mut cursor = offset;
+
+        while let Some((idx, ch)) = text[..cursor].char_indices().last() {
+            if !ch.is_whitespace() {
+                break;
+            }
+            cursor = idx;
+        }
+
+        let Some((mut idx, ch)) = text[..cursor].char_indices().last() else {
+            return 0;
+        };
+        let target_is_word = Self::is_word_char(ch);
+        loop {
+            let previous = text[..idx].char_indices().last();
+            match previous {
+                Some((previous_idx, previous_ch))
+                    if !previous_ch.is_whitespace()
+                        && Self::is_word_char(previous_ch) == target_is_word =>
+                {
+                    idx = previous_idx;
+                }
+                _ => return idx,
+            }
+        }
+    }
+
+    fn next_word_boundary(text: &str, offset: usize) -> usize {
+        debug_assert!(text.is_char_boundary(offset));
+        let mut cursor = offset;
+
+        while cursor < text.len() {
+            let Some(ch) = text[cursor..].chars().next() else {
+                return text.len();
+            };
+            if !ch.is_whitespace() {
+                break;
+            }
+            cursor += ch.len_utf8();
+        }
+
+        let Some(ch) = text[cursor..].chars().next() else {
+            return text.len();
+        };
+        let target_is_word = Self::is_word_char(ch);
+        cursor += ch.len_utf8();
+        while cursor < text.len() {
+            let Some(ch) = text[cursor..].chars().next() else {
+                break;
+            };
+            if ch.is_whitespace() || Self::is_word_char(ch) != target_is_word {
+                break;
+            }
+            cursor += ch.len_utf8();
+        }
+        cursor
     }
 
     fn word_range_at_offset(text: &str, offset: usize) -> Range<usize> {
@@ -700,6 +890,16 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::cut))
             .on_action(cx.listener(Self::move_left_selecting))
             .on_action(cx.listener(Self::move_right_selecting))
+            .on_action(cx.listener(Self::move_to_start_selecting))
+            .on_action(cx.listener(Self::move_to_end_selecting))
+            .on_action(cx.listener(Self::move_word_left))
+            .on_action(cx.listener(Self::move_word_right))
+            .on_action(cx.listener(Self::move_word_left_selecting))
+            .on_action(cx.listener(Self::move_word_right_selecting))
+            .on_action(cx.listener(Self::delete_previous_word))
+            .on_action(cx.listener(Self::delete_next_word))
+            .on_action(cx.listener(Self::delete_to_start))
+            .on_action(cx.listener(Self::delete_to_end))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down))
             .on_mouse_move(cx.listener(Self::mouse_move))
             .w_full()
@@ -785,6 +985,35 @@ mod tests {
         assert_eq!(
             TextInput::word_range_at_offset(text, text.len()),
             "alpha βeta_2".len()..text.len()
+        );
+    }
+
+    #[test]
+    fn word_boundaries_skip_whitespace_and_preserve_utf8_boundaries() {
+        let text = "alpha βeta_2 ++ gamma";
+        let beta_start = "alpha ".len();
+        let beta_end = "alpha βeta_2".len();
+        let symbols_start = "alpha βeta_2 ".len();
+        let symbols_end = "alpha βeta_2 ++".len();
+        let gamma_start = "alpha βeta_2 ++ ".len();
+
+        assert_eq!(
+            TextInput::previous_word_boundary(text, beta_end),
+            beta_start
+        );
+        assert_eq!(
+            TextInput::previous_word_boundary(text, gamma_start),
+            symbols_start
+        );
+        assert_eq!(
+            TextInput::previous_word_boundary(text, text.len()),
+            gamma_start
+        );
+        assert_eq!(TextInput::next_word_boundary(text, 0), "alpha".len());
+        assert_eq!(TextInput::next_word_boundary(text, "alpha".len()), beta_end);
+        assert_eq!(
+            TextInput::next_word_boundary(text, symbols_start),
+            symbols_end
         );
     }
 }
