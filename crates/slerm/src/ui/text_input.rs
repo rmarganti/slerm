@@ -148,6 +148,7 @@ impl TextInput {
     fn select_all(&mut self, _: &TextInputSelectAll, _: &mut Window, cx: &mut Context<Self>) {
         self.selection_anchor = 0;
         self.cursor = self.text.len();
+        self.marked_range = None;
         cx.notify();
     }
 
@@ -848,14 +849,14 @@ impl Element for TextElement {
             cx,
         );
         let line = prepaint.line.take().unwrap();
-        for selection_quad in prepaint.selection_quads.drain(..) {
-            window.paint_quad(selection_quad);
-        }
         let line_origin = point(
             bounds.left() - prepaint.horizontal_scroll_offset,
             bounds.top(),
         );
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
+            for selection_quad in prepaint.selection_quads.drain(..) {
+                window.paint_quad(selection_quad);
+            }
             line.paint(line_origin, window.line_height(), window, cx)
                 .unwrap();
             if focus_handle.is_focused(window)

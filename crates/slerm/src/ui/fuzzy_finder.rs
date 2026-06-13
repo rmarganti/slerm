@@ -129,6 +129,8 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
     }
 
     fn select_page_up(&mut self, _: &menu::SelectPageUp, _: &mut Window, cx: &mut Context<Self>) {
+        // The picker is compact and does not maintain a page-size model, so page
+        // navigation intentionally jumps to the boundary of the result set.
         if self.select_first_match() {
             cx.notify();
         }
@@ -140,6 +142,8 @@ impl<T: Clone + 'static> FuzzyFinder<T> {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // See select_page_up: with this compact picker, page-down means jump to the
+        // bottom of the current result set.
         if self.select_last_match() {
             cx.notify();
         }
