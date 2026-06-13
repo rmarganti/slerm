@@ -1,10 +1,10 @@
 use std::ops::Range;
 
 use gpui::{
-    App, Bounds, Context, Element, ElementId, ElementInputHandler, Entity, EntityInputHandler,
-    FocusHandle, Focusable, GlobalElementId, IntoElement, LayoutId, PaintQuad, Pixels, Render,
-    ShapedLine, SharedString, Style, TextRun, UTF16Selection, Window, actions, div, fill, point,
-    prelude::*, px, relative, size,
+    App, Bounds, ClipboardItem, Context, Element, ElementId, ElementInputHandler, Entity,
+    EntityInputHandler, FocusHandle, Focusable, GlobalElementId, IntoElement, LayoutId, PaintQuad,
+    Pixels, Render, ShapedLine, SharedString, Style, TextRun, UTF16Selection, Window, actions, div,
+    fill, point, prelude::*, px, relative, size,
 };
 
 use crate::theme;
@@ -21,6 +21,11 @@ actions!(
         TextInputBackspace,
         TextInputDelete,
         TextInputPaste,
+        TextInputSelectAll,
+        TextInputCopy,
+        TextInputCut,
+        TextInputMoveLeftSelecting,
+        TextInputMoveRightSelecting,
     ]
 );
 
@@ -29,6 +34,7 @@ pub struct TextInput {
     text: SharedString,
     placeholder: SharedString,
     cursor: usize,
+    selection_anchor: usize,
     marked_range: Option<Range<usize>>,
     last_layout: Option<ShapedLine>,
     last_bounds: Option<Bounds<Pixels>>,
@@ -42,6 +48,7 @@ impl TextInput {
             text: "".into(),
             placeholder: placeholder.into(),
             cursor: 0,
+            selection_anchor: 0,
             marked_range: None,
             last_layout: None,
             last_bounds: None,
@@ -65,30 +72,37 @@ impl TextInput {
     pub fn set_text(&mut self, text: impl Into<SharedString>, cx: &mut Context<Self>) {
         self.text = text.into();
         self.cursor = self.text.len();
+        self.selection_anchor = self.cursor;
+        self.marked_range = None;
         cx.notify();
     }
 
     fn move_left(&mut self, _: &TextInputMoveLeft, _: &mut Window, cx: &mut Context<Self>) {
-        self.cursor = self.previous_boundary(self.cursor);
+        self.move_cursor_left(false);
         cx.notify();
     }
 
     fn move_right(&mut self, _: &TextInputMoveRight, _: &mut Window, cx: &mut Context<Self>) {
-        self.cursor = self.next_boundary(self.cursor);
+        self.move_cursor_right(false);
         cx.notify();
     }
 
     fn move_to_start(&mut self, _: &TextInputMoveToStart, _: &mut Window, cx: &mut Context<Self>) {
-        self.cursor = 0;
+        self.move_cursor_to(0, false);
         cx.notify();
     }
 
     fn move_to_end(&mut self, _: &TextInputMoveToEnd, _: &mut Window, cx: &mut Context<Self>) {
-        self.cursor = self.text.len();
+        self.move_cursor_to(self.text.len(), false);
         cx.notify();
     }
 
     fn backspace(&mut self, _: &TextInputBackspace, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(range) = self.selected_range() {
+            self.replace_range(range, "", window, cx);
+            return;
+        }
+
         let previous = self.previous_boundary(self.cursor);
         if previous != self.cursor {
             self.replace_range(previous..self.cursor, "", window, cx);
@@ -96,6 +110,11 @@ impl TextInput {
     }
 
     fn delete(&mut self, _: &TextInputDelete, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(range) = self.selected_range() {
+            self.replace_range(range, "", window, cx);
+            return;
+        }
+
         let next = self.next_boundary(self.cursor);
         if next != self.cursor {
             self.replace_range(self.cursor..next, "", window, cx);
@@ -105,12 +124,48 @@ impl TextInput {
     fn paste(&mut self, _: &TextInputPaste, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             self.replace_range(
-                self.cursor..self.cursor,
+                self.replacement_range(),
                 &text.replace('\n', " "),
                 window,
                 cx,
             );
         }
+    }
+
+    fn select_all(&mut self, _: &TextInputSelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        self.selection_anchor = 0;
+        self.cursor = self.text.len();
+        cx.notify();
+    }
+
+    fn copy(&mut self, _: &TextInputCopy, _: &mut Window, cx: &mut Context<Self>) {
+        self.copy_selected_text(cx);
+    }
+
+    fn cut(&mut self, _: &TextInputCut, window: &mut Window, cx: &mut Context<Self>) {
+        if self.copy_selected_text(cx) {
+            self.replace_range(self.replacement_range(), "", window, cx);
+        }
+    }
+
+    fn move_left_selecting(
+        &mut self,
+        _: &TextInputMoveLeftSelecting,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor_left(true);
+        cx.notify();
+    }
+
+    fn move_right_selecting(
+        &mut self,
+        _: &TextInputMoveRightSelecting,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_cursor_right(true);
+        cx.notify();
     }
 
     fn replace_range(
@@ -120,15 +175,69 @@ impl TextInput {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.text =
-            (self.text[0..range.start].to_owned() + new_text + &self.text[range.end..]).into();
-        self.cursor = range.start + new_text.len();
-        self.marked_range = None;
+        self.replace_range_without_notify(range, new_text);
         if let Some(on_change) = self.on_change.take() {
             on_change(&self.text, window, cx);
             self.on_change = Some(on_change);
         }
         cx.notify();
+    }
+
+    fn replace_range_without_notify(&mut self, range: Range<usize>, new_text: &str) {
+        debug_assert!(self.text.is_char_boundary(range.start));
+        debug_assert!(self.text.is_char_boundary(range.end));
+        self.text = Self::text_replacing_range(&self.text, range.clone(), new_text);
+        self.cursor = range.start + new_text.len();
+        self.selection_anchor = self.cursor;
+        self.marked_range = None;
+    }
+
+    fn replacement_range(&self) -> Range<usize> {
+        self.marked_range
+            .clone()
+            .or_else(|| self.selected_range())
+            .unwrap_or(self.cursor..self.cursor)
+    }
+
+    fn selected_range(&self) -> Option<Range<usize>> {
+        Self::selected_range_for(self.cursor, self.selection_anchor)
+    }
+
+    fn has_reversed_selection(&self) -> bool {
+        self.cursor < self.selection_anchor
+    }
+
+    fn move_cursor_left(&mut self, selecting: bool) {
+        if !selecting && let Some(range) = self.selected_range() {
+            self.move_cursor_to(range.start, false);
+            return;
+        }
+        self.move_cursor_to(self.previous_boundary(self.cursor), selecting);
+    }
+
+    fn move_cursor_right(&mut self, selecting: bool) {
+        if !selecting && let Some(range) = self.selected_range() {
+            self.move_cursor_to(range.end, false);
+            return;
+        }
+        self.move_cursor_to(self.next_boundary(self.cursor), selecting);
+    }
+
+    fn move_cursor_to(&mut self, offset: usize, selecting: bool) {
+        debug_assert!(self.text.is_char_boundary(offset));
+        self.cursor = offset;
+        if !selecting {
+            self.selection_anchor = self.cursor;
+        }
+        self.marked_range = None;
+    }
+
+    fn copy_selected_text(&self, cx: &mut Context<Self>) -> bool {
+        let Some(range) = self.selected_range() else {
+            return false;
+        };
+        cx.write_to_clipboard(ClipboardItem::new_string(self.text[range].to_string()));
+        true
     }
 
     fn previous_boundary(&self, offset: usize) -> usize {
@@ -148,9 +257,25 @@ impl TextInput {
     }
 
     fn offset_from_utf16(&self, offset: usize) -> usize {
+        Self::offset_from_utf16_in_text(&self.text, offset)
+    }
+
+    fn offset_to_utf16(&self, offset: usize) -> usize {
+        Self::offset_to_utf16_in_text(&self.text, offset)
+    }
+
+    fn range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
+        self.offset_to_utf16(range.start)..self.offset_to_utf16(range.end)
+    }
+
+    fn range_from_utf16(&self, range_utf16: &Range<usize>) -> Range<usize> {
+        self.offset_from_utf16(range_utf16.start)..self.offset_from_utf16(range_utf16.end)
+    }
+
+    fn offset_from_utf16_in_text(text: &str, offset: usize) -> usize {
         let mut utf8_offset = 0;
         let mut utf16_count = 0;
-        for ch in self.text.chars() {
+        for ch in text.chars() {
             if utf16_count >= offset {
                 break;
             }
@@ -160,10 +285,10 @@ impl TextInput {
         utf8_offset
     }
 
-    fn offset_to_utf16(&self, offset: usize) -> usize {
+    fn offset_to_utf16_in_text(text: &str, offset: usize) -> usize {
         let mut utf16_offset = 0;
         let mut utf8_count = 0;
-        for ch in self.text.chars() {
+        for ch in text.chars() {
             if utf8_count >= offset {
                 break;
             }
@@ -173,12 +298,13 @@ impl TextInput {
         utf16_offset
     }
 
-    fn range_to_utf16(&self, range: &Range<usize>) -> Range<usize> {
-        self.offset_to_utf16(range.start)..self.offset_to_utf16(range.end)
+    fn selected_range_for(cursor: usize, selection_anchor: usize) -> Option<Range<usize>> {
+        (cursor != selection_anchor)
+            .then(|| cursor.min(selection_anchor)..cursor.max(selection_anchor))
     }
 
-    fn range_from_utf16(&self, range_utf16: &Range<usize>) -> Range<usize> {
-        self.offset_from_utf16(range_utf16.start)..self.offset_from_utf16(range_utf16.end)
+    fn text_replacing_range(text: &str, range: Range<usize>, new_text: &str) -> SharedString {
+        (text[0..range.start].to_owned() + new_text + &text[range.end..]).into()
     }
 }
 
@@ -201,9 +327,10 @@ impl EntityInputHandler for TextInput {
         _window: &mut Window,
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
+        let range = self.selected_range().unwrap_or(self.cursor..self.cursor);
         Some(UTF16Selection {
-            range: self.range_to_utf16(&(self.cursor..self.cursor)),
-            reversed: false,
+            range: self.range_to_utf16(&range),
+            reversed: self.has_reversed_selection(),
         })
     }
 
@@ -231,8 +358,7 @@ impl EntityInputHandler for TextInput {
         let range = range_utf16
             .as_ref()
             .map(|range_utf16| self.range_from_utf16(range_utf16))
-            .or(self.marked_range.clone())
-            .unwrap_or(self.cursor..self.cursor);
+            .unwrap_or_else(|| self.replacement_range());
         self.replace_range(range, new_text, window, cx);
     }
 
@@ -247,14 +373,15 @@ impl EntityInputHandler for TextInput {
         let range = range_utf16
             .as_ref()
             .map(|range_utf16| self.range_from_utf16(range_utf16))
-            .or(self.marked_range.clone())
-            .unwrap_or(self.cursor..self.cursor);
+            .unwrap_or_else(|| self.replacement_range());
         self.replace_range(range.clone(), new_text, window, cx);
         self.marked_range =
             (!new_text.is_empty()).then_some(range.start..range.start + new_text.len());
         if let Some(selected_range) = new_selected_range_utf16 {
-            let selected_range = self.range_from_utf16(&selected_range);
-            self.cursor = range.start + selected_range.end;
+            self.selection_anchor =
+                range.start + Self::offset_from_utf16_in_text(new_text, selected_range.start);
+            self.cursor =
+                range.start + Self::offset_from_utf16_in_text(new_text, selected_range.end);
         }
     }
 
@@ -414,6 +541,11 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::backspace))
             .on_action(cx.listener(Self::delete))
             .on_action(cx.listener(Self::paste))
+            .on_action(cx.listener(Self::select_all))
+            .on_action(cx.listener(Self::copy))
+            .on_action(cx.listener(Self::cut))
+            .on_action(cx.listener(Self::move_left_selecting))
+            .on_action(cx.listener(Self::move_right_selecting))
             .w_full()
             .h(px(40.0))
             .px_3()
@@ -427,5 +559,41 @@ impl Render for TextInput {
 impl Focusable for TextInput {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replacing_selection_preserves_utf8_boundaries() {
+        let text = "aé😄b";
+        let range = TextInput::selected_range_for("aé😄".len(), 1).unwrap();
+
+        let replaced = TextInput::text_replacing_range(text, range.clone(), "ø");
+
+        assert_eq!(range, 1.."aé😄".len());
+        assert_eq!(replaced.as_ref(), "aøb");
+        assert_eq!(range.start + "ø".len(), "aø".len());
+    }
+
+    #[test]
+    fn utf16_offsets_handle_multibyte_ranges() {
+        let text = "a😄b";
+        let range = TextInput::selected_range_for("a".len(), "a😄".len()).unwrap();
+        let utf16_range = TextInput::offset_to_utf16_in_text(text, range.start)
+            ..TextInput::offset_to_utf16_in_text(text, range.end);
+
+        assert_eq!(range, "a".len().."a😄".len());
+        assert_eq!(utf16_range, 1..3);
+        assert_eq!(TextInput::offset_from_utf16_in_text(text, 3), "a😄".len());
+    }
+
+    #[test]
+    fn selected_range_tracks_reversed_selections() {
+        assert_eq!(TextInput::selected_range_for(5, 1), Some(1..5));
+        assert_eq!(TextInput::selected_range_for(1, 5), Some(1..5));
+        assert_eq!(TextInput::selected_range_for(3, 3), None);
     }
 }
